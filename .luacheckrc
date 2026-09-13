@@ -26,6 +26,7 @@ globals = {
     "z2k_dynamic_ttl",
     "cond_tcp_has_ts",
     "automate_host_record",
+    "circular_report_failure",
     "circular",
     -- Сброс накопленных счётчиков удач/неудач хоста. Предусмотрен движком
     -- ровно для нашего случая: состояние ротации меняет не детектор, а человек

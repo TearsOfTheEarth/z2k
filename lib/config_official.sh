@@ -373,10 +373,8 @@ generate_nfqws2_opt_from_strategies() {
 
     # ── Детекторы TCP-пулов: штатные, с параметрами из документации ──────────
     #
-    # Решение Марка 10.09.2026: никаких своих детекторов, только
-    # standard_failure_detector / standard_success_detector bol-van. Значения
-    # ниже — из docs/manual.md апстрима (standard_*_detector), не «по дефолту»,
-    # а по смыслу каждого:
+    # Базовые пороги штатного детектора. Узкие TLS/HTTP-поправки подключаются
+    # ниже, после нормализации профилей.
     #
     #   retrans=3   «считать неудачей не менее retrans ретрансмиссий». Клиент
     #               сам ретрансмитит ClientHello с backoff 1-2-4 с — три штуки
@@ -632,15 +630,9 @@ generate_nfqws2_opt_from_strategies() {
     # Детекторы: штатные bol-van ПЛЮС наши поправки к ним — проводка ниже,
     # после всех правок профилей (ищи ensure_rkn_failure_detector).
     #
-    # 10.09.2026 поправки были сняты, 11.09.2026 возвращены решением Марка:
-    # отказ от них совпал по времени с ростом числа ротаций, а заняты они ровно
-    # обратным — ротацию ПРИТОРМАЖИВАЮТ (живой хост не ротируем, RST сервера не
-    # провал, провал засчитывается той стратегии, на которой соединение
-    # началось). Не вернулись только те, что были подпорками под обрыв на
-    # 16 КБ: он теперь отдельная проба и отдельный рантайм (z2k-tcp16.lua).
-    #
-    # Редирект 302/307 на чужой домен 2-го уровня ловит штатный детектор
-    # (manual: «http редиректом от DPI считается…»), no_http_redirect не ставим.
+    # TCP-обёртка ограничивает ретрансмиссии первым запросом, разбирает
+    # ранний TLS alert и явные HTTP-заглушки. RST проверяет штатный детектор.
+    # Обрыв на 16 КБ обслуживается отдельно (z2k-tcp16.lua).
 
     # Phase 6A: auto-inject fool=z2k_dynamic_ttl into every
     # --lua-desync=fake:*  (and fakedsplit/fakeddisorder/hostfakesplit) that
@@ -1246,22 +1238,8 @@ generate_nfqws2_opt_from_strategies() {
         printf '%s' "$out"
     }
 
-    # yt_tcp переведён на ту же раскладку, что gv_tcp и rkn_tcp (19.08.2026).
-    #
-    # ensure_youtube_tls_failure_detection оставляет --payload= ПЕРЕД circular,
-    # и инстанс получает payload_type = {tls_client_hello, empty} вместо all.
-    # Ровно об этом сужении написано в комментарии выше — вывод сделали, когда
-    # снимали тумблер RKN_SILENT_FALLBACK, но сам yt_tcp на сужающей ветке так
-    # и остался. Цена, замер на боевом роутере 19.08.2026:
-    #   key="yt_tcp" ... payload_type= empty tls_client_hello
-    #   key="gv_tcp" ... payload_type= all
-    #   key="rkn_tcp" ... payload_type= all
-    # Движок зовёт инстанс только на подходящем payload, поэтому на yt_tcp до
-    # детектора НЕ доходил ни один входящий пакет С ДАННЫМИ. Мёртвыми там были
-    # разом: правило вставшего потока (при том что yt_tcp прямо перечислен в
-    # Z2K_RETRANS_POOLS), фатальный TLS-алерт, сверка TTL и весь гвард живости —
-    # им всем нужен пакет с пейлоадом. Доезжали только исходящий ClientHello и
-    # пустые пакеты, то есть RST без единого гварда.
+    # circular должен видеть данные обоих направлений, включая продолжения
+    # ClientHello и ответа с l7payload=unknown. Фильтры самих стратегий остаются.
     youtube_tcp=$(ensure_youtube_tls_circular_manual_layout "$youtube_tcp" "5556")
     youtube_gv_tcp=$(ensure_youtube_tls_circular_manual_layout "$youtube_gv_tcp" "5556")
 
@@ -1301,25 +1279,10 @@ generate_nfqws2_opt_from_strategies() {
     # функции, которой нет на диске), и проводка, поставленная раньше, была бы
     # им же и съедена — молча.
     #
-    # Детектор не заменяет штатный, а оборачивает: зовёт
-    # standard_failure_detector и добавляет отличия, каждое из которых меряли на
-    # боевом роутере 18-19.08.2026 (подробности — в шапке lua-файла):
-    #   1. ретрансмиссию считаем провалом только на первом запросе (ClientHello
-    #      или http_req). Иначе провалом становится любая потеря пакета в уже
-    #      работающей сессии, и рабочая страта уезжает при 29 успехах против 3
-    #      провалов;
-    #   2. фатальный TLS-алерт до ServerHello — провал. Без этого класс блока
-    #      «сервер подтвердил ClientHello, ответил алертом и закрылся по FIN»
-    #      не даёт детектору события вовсе;
-    #   3. RST от самого сервера — НЕ провал. Отличаем по TTL: инжектированный
-    #      на пути приходит с TTL, который потоку настоящего сервера принадлежать
-    #      не может (126 против полусотни). Без этого apple.com уезжал с рабочей
-    #      первой стратегии на нерабочую вторую;
-    #   4. живой хост не ротируем: если в текущем окне к тому же хосту прошли
-    #      нормальные ответы, поддельный RST провалом не считается;
-    #   5. провал засчитывается ТОЙ стратегии, на которой соединение началось —
-    #      иначе провалы, начатые до ротации, вешаются на плечи, не отправившие
-    #      ни одного пакета (замер 19.08: двенадцать ротаций за секунду).
+    # Обёртка использует штатные RST/ретрансмиссии и добавляет разбор раннего
+    # TLS alert и HTTP-заглушек. TTL, соседние потоки и входящие повторы не
+    # считаются доказательством успеха/блокировки. Привязка к стратегии и
+    # поколению, терминальные исходы и reset принадлежат ядру circular.
     #
     # Проводка ставится ТОЛЬКО если файл лежит на диске: движок резолвит имя
     # детектора по _G и на неизвестном валится в error() НА КАЖДОМ ПАКЕТЕ
@@ -1348,26 +1311,17 @@ generate_nfqws2_opt_from_strategies() {
 
     if [ -f "${ZAPRET2_DIR:-/opt/zapret2}/lua/z2k-alert.lua" ]; then
         rkn_tcp=$(ensure_rkn_failure_detector "$rkn_tcp" "z2k_fail_tls_alert")
-        # Пулы видео — замер 18.08.2026 на LG webOS. На заведомо нерабочей
-        # стратегии соединение поднималось, сервер отдавал 4482 байта и дальше
-        # слал один и тот же сегмент 15-16 раз. Ни RST, ни FIN, ни исходящих
-        # ретрансмитов — штатный детектор молчал (676 вызовов, ноль событий),
-        # страта стояла вечно, видео и превью не грузились.
         youtube_tcp=$(ensure_rkn_failure_detector "$youtube_tcp" "z2k_fail_tls_alert")
         youtube_gv_tcp=$(ensure_rkn_failure_detector "$youtube_gv_tcp" "z2k_fail_tls_alert")
     else
         echo "WARN: lua/z2k-alert.lua отсутствует — детекторы остаются чисто штатными" 1>&2
     fi
 
-    # QUIC — детектор по молчанию, отдельным файлом и отдельным гейтом.
-    #
-    # Штатный детектор для QUIC не работает в принципе: он считает провалом
-    # «отослано много, принято мало», а мёртвый QUIC-поток шлёт МЕНЬШЕ пакетов,
-    # чем живой — браузер не ретрансмитит Initial, а уходит на TCP. Замер
-    # 19.08.2026 по 1646 потокам: ни один порог от 2 до 12 эти классы не
-    # разделяет. Различает их время, поэтому детектор ждёт ответа по таймеру.
+    # QUIC v1/v2: таймер прогресса рукопожатия, общий предел ожидания и
+    # нейтральный исход при исчерпании окна перехвата. Пределы передаём из
+    # тех же констант, которыми ниже настраивается NFQUEUE.
     if [ -f "${ZAPRET2_DIR:-/opt/zapret2}/lua/z2k-quic-silence.lua" ]; then
-        quic_udp=$(ensure_rkn_failure_detector "$quic_udp" "z2k_fail_quic_silence")
+        quic_udp=$(ensure_rkn_failure_detector "$quic_udp" "z2k_fail_quic_silence:quic_in_limit=${Z2K_UDP_PKT_IN}:quic_out_limit=${Z2K_UDP_PKT_OUT}")
     else
         echo "WARN: lua/z2k-quic-silence.lua отсутствует — QUIC остаётся на штатном детекторе" 1>&2
     fi
@@ -1706,37 +1660,11 @@ generate_nfqws2_opt_from_strategies() {
     # Тот же набор списков, что у TLS-профиля, минус Discord (см. сборку выше).
     # Отдельного второго сборщика здесь больше нет — именно он и разъезжался.
     local rkn_http_extras="$rkn_lists_tail"
-    # native rollback 2026-05-28: http_rkn failure_detector=/success_detector=
-    # инжекты z2k_* и no_http_redirect убраны. circular идёт на нативных
-    # standard_failure_detector / standard_success_detector bol-van zapret2
-    # (кастомные детекторы заархивированы, см. archive/). Нативная 302/307
-    # redirect-детекция активна — block-page redirect снова считается fail.
-    # http_rkn payload filter:
-    #   http_req  — outgoing GET/POST (что строит модифицирующая стратегия)
-    #   empty     — TCP control packets без payload (SYN/ACK сами по себе
-    #                 проходят через standard_failure_detector RST-чек)
-    #   http_reply — ИНКОМИНГ HTTP-ответ от сервера. Без этого профиль
-    #                 фильтрует replies на entry, и detector chain никогда
-    #                 не видит l7=http_reply → z2k_classify_http_reply
-    #                 (commits 3-4 v3.6) становится dead code на всех
-    #                 plain HTTP flows. Field-test 2026-04-30 показал 0
-    #                 http_reply events за весь soak — добавили http_reply
-    #                 чтобы классификатор реально видел ответы. Strategies
-    #                 (multisplit/syndata/fake/etc) внутри scope-нуты на
-    #                 payload=http_req, так что они не сработают на
-    #                 incoming replies — только detectors классифицируют.
-    http_rkn="--filter-tcp=80 $wl_excl --hostlist=${extra_strats_dir}/TCP/RKN/List.txt${rkn_http_extras} --in-range=-s5556 --payload=http_req,empty,http_reply --lua-desync=circular:fails=3:time=60:key=http_rkn:nld=2 --lua-desync=http_methodeol:payload=http_req:dir=out:strategy=1 --lua-desync=syndata:payload=http_req:dir=out:strategy=2 --lua-desync=multisplit:payload=http_req:dir=out:strategy=2 --lua-desync=hostfakesplit:payload=http_req:dir=out:ip_ttl=2:repeats=1:strategy=3 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=4 --lua-desync=fakedsplit:payload=http_req:dir=out:pos=method+2:badsum:strategy=5 --lua-desync=fake:payload=http_req:dir=out:blob=0x0E0E0F0E:tcp_md5:strategy=6 --lua-desync=multisplit:payload=http_req:dir=out:pos=host+1:seqovl=2:strategy=6 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=7 --lua-desync=multisplit:payload=http_req:dir=out:pos=method+2:strategy=7 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=8 --lua-desync=fakedsplit:payload=http_req:dir=out:pos=method+2:ip_autottl=2,1-64:badsum:strategy=8 --in-range=x --new"
+    # Детектору нужны также продолжения HTTP-заголовков/тела (unknown).
+    # Изменяющие пакеты стратегии по-прежнему ограничены исходящим http_req.
+    http_rkn="--filter-tcp=80 $wl_excl --hostlist=${extra_strats_dir}/TCP/RKN/List.txt${rkn_http_extras} --in-range=-s5556 --payload=all --lua-desync=circular:fails=3:time=60:key=http_rkn:nld=2 --lua-desync=http_methodeol:payload=http_req:dir=out:strategy=1 --lua-desync=syndata:payload=http_req:dir=out:strategy=2 --lua-desync=multisplit:payload=http_req:dir=out:strategy=2 --lua-desync=hostfakesplit:payload=http_req:dir=out:ip_ttl=2:repeats=1:strategy=3 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=4 --lua-desync=fakedsplit:payload=http_req:dir=out:pos=method+2:badsum:strategy=5 --lua-desync=fake:payload=http_req:dir=out:blob=0x0E0E0F0E:tcp_md5:strategy=6 --lua-desync=multisplit:payload=http_req:dir=out:pos=host+1:seqovl=2:strategy=6 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=7 --lua-desync=multisplit:payload=http_req:dir=out:pos=method+2:strategy=7 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=8 --lua-desync=fakedsplit:payload=http_req:dir=out:pos=method+2:ip_autottl=2,1-64:badsum:strategy=8 --in-range=x --new"
 
-    # http_rkn — тот же штатный детектор: ретрансмиссии, RST, DPI-редирект.
-    # Обёртка нужна и здесь. Пул объявляется НИЖЕ блока проводки TLS-пулов, и
-    # до 19.08.2026 его туда просто забыли добавить: http_rkn оставался на голом
-    # standard_failure_detector без единого гварда. Цена — apple.com уехал с
-    # рабочей первой стратегии на вторую на живом трафике:
-    #   standard_failure_detector: incoming RST s524 in range s4096   x13/мин
-    # RST после 524 байт ответа — это сервер закрылся сам, а не DPI. Обёртка
-    # отсеивает такие по TTL и по живости хоста; исходящий ретрансмит она
-    # пропускает в штатный детектор на http_req ровно так же, как на
-    # ClientHello, поэтому детект молчаливого дропа не теряется.
+    # HTTP-пул создаётся после общей проводки: подключаем обёртку здесь.
     if [ -f "${ZAPRET2_DIR:-/opt/zapret2}/lua/z2k-alert.lua" ]; then
         http_rkn=$(ensure_rkn_failure_detector "$http_rkn" "z2k_fail_tls_alert")
     fi
