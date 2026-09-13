@@ -120,4 +120,23 @@ H.test('confirmed small HTTP 200 resets failures',function()
     local _,c=H.step(H.http(d.track,#d.dis.payload+1,'Content-Length: 0\r\n\r\n'))
     H.eq(true,c.nocheck); H.eq(nil,c.neutral); H.eq(nil,h.failure_counter)
 end)
+H.test('two retransmissions fail one attempt; three failed connections rotate',function()
+    local h
+    for attempt=1,3 do
+        local d=H.tcp(nil,true,1,H.client,'tls_client_hello'); local c
+        h,c=H.step(d)
+        H.step(H.tcp(d.track,true,1,H.client,'tls_client_hello',true))
+        H.eq(nil,c.failure); H.eq(attempt-1,#H.sent)
+        H.step(H.tcp(d.track,true,1,H.client,'tls_client_hello',true))
+        H.eq(true,c.failure); H.eq(attempt,#H.sent)
+        H.eq(attempt==3 and 2 or 1,h.nstrategy)
+    end
+end)
+H.test('a single lost packet can recover without reset or rotation',function()
+    local d=H.tcp(nil,true,1,H.client,'tls_client_hello'); local h,c=H.step(d)
+    H.step(H.tcp(d.track,true,1,H.client,'tls_client_hello',true))
+    H.step(H.tcp(d.track,false,1,H.hello,'tls_server_hello'))
+    H.step(H.tcp(d.track,false,4200,'fresh application progress'))
+    H.eq(true,c.nocheck); H.eq(nil,c.failure); H.eq(0,#H.sent); H.eq(1,h.nstrategy)
+end)
 H.finish()

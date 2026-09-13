@@ -181,7 +181,7 @@ generate_nfqws2_opt_from_strategies() {
     # срабатываний. Значение измерено, поэтому держим его, а не умолчание.
     # Оба порога обязаны лежать ниже окна перехвата NFQWS2_UDP_PKT_IN/OUT —
     # см. комментарий там же. Same change mirrored in quic_strats.ini.
-    quic_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=5:key=yt_quic:nld=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=3:ip_autottl=-2,3-20:strategy=1 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=1 --lua-desync=drop:strategy=1 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=4:ip_autottl=-2,3-20:strategy=2 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=2 --lua-desync=drop:strategy=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_rutracker:repeats=6:strategy=3 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3:ipfrag_pos_udp=16:ipfrag_pos2=48:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=3 --lua-desync=drop:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-2,3-20:strategy=4 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=5 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=5 --lua-desync=drop:strategy=5 --lua-desync=udplen:payload=quic_initial:dir=out:increment=4:strategy=6 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=6 --lua-desync=udplen:payload=quic_initial:dir=out:increment=8:pattern=0xFEA82025:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=0x00000000000000000000000000000000:repeats=2:payload=all:strategy=8 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=8 --lua-desync=drop:strategy=8 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:ip_autottl=-2,3-20:strategy=9 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=24:strategy=9 --lua-desync=drop:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=10 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:noise=2:pad_min=12:pad_max=72:strategy=11 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:profile=2:noise=2:pad_min=8:pad_max=64:ipfrag_pos_udp=16:ipfrag_pos2=56:ipfrag_overlap12=16:ipfrag_overlap23=8:strategy=12 --lua-desync=z2k_timing_morph:payload=quic_initial:dir=out:packets=2:chance=85:fakes=2:pad_min=12:pad_max=72:strategy=13"
+    quic_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=5:key=yt_quic:nld=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=3:ip_autottl=-2,3-20:strategy=1 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=1 --lua-desync=drop:payload=quic_initial:dir=out:strategy=1 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=4:ip_autottl=-2,3-20:strategy=2 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=2 --lua-desync=drop:payload=quic_initial:dir=out:strategy=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_rutracker:repeats=6:strategy=3 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3:ipfrag_pos_udp=16:ipfrag_pos2=48:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=3 --lua-desync=drop:payload=quic_initial:dir=out:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-2,3-20:strategy=4 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=5 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=5 --lua-desync=drop:payload=quic_initial:dir=out:strategy=5 --lua-desync=udplen:payload=quic_initial:dir=out:increment=4:strategy=6 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=6 --lua-desync=udplen:payload=quic_initial:dir=out:increment=8:pattern=0xFEA82025:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=0x00000000000000000000000000000000:repeats=2:payload=all:strategy=8 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=8 --lua-desync=drop:payload=quic_initial:dir=out:strategy=8 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:ip_autottl=-2,3-20:strategy=9 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=24:strategy=9 --lua-desync=drop:payload=quic_initial:dir=out:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=10 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:noise=2:pad_min=12:pad_max=72:strategy=11 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:profile=2:noise=2:pad_min=8:pad_max=64:ipfrag_pos_udp=16:ipfrag_pos2=56:ipfrag_overlap12=16:ipfrag_overlap23=8:strategy=12 --lua-desync=z2k_timing_morph:payload=quic_initial:dir=out:packets=2:chance=85:fakes=2:pad_min=12:pad_max=72:strategy=13"
 
     # If category strategy files exist, prefer them over hardcoded QUIC defaults.
     _cs=$(z2k_custom_strategy yt_quic) && [ -n "$_cs" ] && quic_udp="$_cs"
@@ -217,7 +217,7 @@ generate_nfqws2_opt_from_strategies() {
     # вместо per-IP фрагментации стокового host_ip fallback'а (иначе Discord
     # voice холодно стартует на каждом новом DC-IP). Нативная замена archived
     # allow_nohost (z2k-autocircular) — алгоритм ротации остаётся circular().
-    discord_udp="--filter-udp=50000-50100,1400,3478-3481,5349,19294-19344 --filter-l7=discord,stun --out-range=-d4 --payload=discord_ip_discovery,stun --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=4:key=discord_udp:nld=2:hostkey=z2k_nohost_key --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=10:strategy=1 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=3:strategy=2 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=6:strategy=3 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=6:ip_autottl=-2,3-20:strategy=4 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=4:strategy=5 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=5:strategy=6"
+    discord_udp="--filter-udp=50000-50099,1400,3478-3481,5349,19294-19344 --filter-l7=discord,stun --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=4:key=discord_udp:hostkey=z2k_nohost_key --in-range=x --out-range=-d4 --payload=discord_ip_discovery,stun --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=10:strategy=1 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=3:strategy=2 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=6:strategy=3 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=6:ip_autottl=-2,3-20:strategy=4 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=4:strategy=5 --lua-desync=fake:payload=all:blob=quic_dbankcloud:repeats=5:strategy=6"
 
     # Дефолт для пула, чей Strategy.txt пуст или нечитаем.
     #
@@ -259,50 +259,43 @@ generate_nfqws2_opt_from_strategies() {
     [ -z "$rkn_tcp" ] && rkn_tcp=$(_z2k_pool_default rkn_tcp)
 
 
-    # Force domain-level memory for all autocircular profiles.
-    # This prevents churn on frequently changing subdomains.
-    ensure_circular_nld2() {
-        local input="$1"
-        local out=""
-        local token=""
-        local opts=""
-        local part=""
-        local rest=""
-        local old_ifs="$IFS"
-
-        set -f  # no glob: $input/$opts tokens may contain *,?,[ ] from hand-edited Strategy.txt
+    # Full hostname by default; the runtime groups only the explicit video CDN.
+    # Missing optional helper falls back to full names, never public suffixes.
+    ensure_circular_host_scope() {
+        local input="$1" out="" token="" opts="" part="" rest=""
+        local old_ifs="$IFS" explicit_hostkey=""
+        set -f
         for token in $input; do
             case "$token" in
                 --lua-desync=circular:*)
                     opts="${token#--lua-desync=circular:}"
-                    rest=""
+                    rest=""; explicit_hostkey=""
                     IFS=':'
                     for part in $opts; do
                         case "$part" in
                             nld=*) ;;
+                            hostkey=*) explicit_hostkey=1; rest="${rest:+$rest:}$part" ;;
                             *) rest="${rest:+$rest:}$part" ;;
                         esac
                     done
                     IFS="$old_ifs"
-                    if [ -n "$rest" ]; then
-                        token="--lua-desync=circular:${rest}:nld=2"
-                    else
-                        token="--lua-desync=circular:nld=2"
+                    token="--lua-desync=circular:${rest:+$rest:}nld=0"
+                    if [ -z "$explicit_hostkey" ] && [ -f "${ZAPRET2_DIR:-/opt/zapret2}/lua/z2k-modern-core.lua" ]; then
+                        token="${token}:hostkey=z2k_service_hostkey"
                     fi
                     ;;
             esac
             out="${out:+$out }$token"
         done
         set +f
-
         IFS="$old_ifs"
         printf '%s' "$out"
     }
 
-    youtube_tcp=$(ensure_circular_nld2 "$youtube_tcp")
-    youtube_gv_tcp=$(ensure_circular_nld2 "$youtube_gv_tcp")
-    rkn_tcp=$(ensure_circular_nld2 "$rkn_tcp")
-    quic_udp=$(ensure_circular_nld2 "$quic_udp")
+    youtube_tcp=$(ensure_circular_host_scope "$youtube_tcp")
+    youtube_gv_tcp=$(ensure_circular_host_scope "$youtube_gv_tcp")
+    rkn_tcp=$(ensure_circular_host_scope "$rkn_tcp")
+    quic_udp=$(ensure_circular_host_scope "$quic_udp")
 
     # ── Окно счётчика провалов (`time=`) ─────────────────────────────────────
     #
@@ -376,31 +369,11 @@ generate_nfqws2_opt_from_strategies() {
     # Базовые пороги штатного детектора. Узкие TLS/HTTP-поправки подключаются
     # ниже, после нормализации профилей.
     #
-    #   retrans=3   «считать неудачей не менее retrans ретрансмиссий». Клиент
-    #               сам ретрансмитит ClientHello с backoff 1-2-4 с — три штуки
-    #               при тихом дропе набираются за ~7 с внутри одного соединения.
-    #               Наши 2 стояли под коробку «обрыв на 16 КБ», она убивала
-    #               соединение после одной ретрансмиссии; этот класс с r-81
-    #               берётся отдельной пробой (z2k-tcp16-probe.sh) и в ротации
-    #               не участвует.
-    #   maxseq=32768 «считать ретрансмиссии в пределах исходящих 1..maxseq»;
-    #               и порог удачи по исходящему: «отправлено достаточно много
-    #               без застревания». 16384 было подгонкой под тот же обрыв.
-    #   inseq=4096  «RST и http-редирект в пределах входящих 1..inseq — неудача;
-    #               сервер прислал больше — удача». Наши 18000/24000/26000
-    #               держали ответ «неуспешным» до 18-26 КБ, чтобы обрыв на
-    #               16 КБ не засчитался успехом, — и ровно этим заставляли
-    #               рабочие хосты ждать защёлки успеха и ловить ложные
-    #               ротации.
-    #   reset       «посылать ретрансмиттеру RST, чтобы прекратить долгое
-    #               ожидание». В автохостлисте у bol-van это умолчание
-    #               (--hostlist-auto-retrans-reset=1). После третьей
-    #               ретрансмиссии стратегия уже признана провальной; без RST
-    #               клиент ещё десятки секунд долбится в мёртвое соединение, с
-    #               RST — сразу переоткрывает его на следующем плече.
-    #               Отключается Z2K_CIRCULAR_RESET=0 (r-53 включал reset при
-    #               retrans=1 и рвал рабочие потоки на одиночной потере; при
-    #               retrans=3 RST уходит только после ~7 с молчания).
+    #   retrans=2   экспериментальный порог: клиент может закончить попытку
+    #               после двух повторов. Это не фиксированная задержка в секундах.
+    #   maxseq=32768 / inseq=4096 — штатные границы байтового наблюдения.
+    #   reset       RST после принятой неудачи по двум повторам; opt-out:
+    #               Z2K_CIRCULAR_RESET=0. Кворум fails=3 остаётся прежним.
     #
     # Проход снимает и любой :failure_detector= / :success_detector= из
     # правленого руками Strategy.txt: имя функции, которой нет на диске,
@@ -434,7 +407,7 @@ generate_nfqws2_opt_from_strategies() {
                         esac
                     done
                     IFS="$old_ifs"
-                    token="--lua-desync=circular:${rest:+$rest:}retrans=3:maxseq=32768:inseq=4096"
+                    token="--lua-desync=circular:${rest:+$rest:}retrans=2:maxseq=32768:inseq=4096"
                     [ "$Z2K_CIRCULAR_RESET" != "0" ] && token="${token}:reset"
                     ;;
             esac
@@ -1662,8 +1635,10 @@ generate_nfqws2_opt_from_strategies() {
     local rkn_http_extras="$rkn_lists_tail"
     # Детектору нужны также продолжения HTTP-заголовков/тела (unknown).
     # Изменяющие пакеты стратегии по-прежнему ограничены исходящим http_req.
-    http_rkn="--filter-tcp=80 $wl_excl --hostlist=${extra_strats_dir}/TCP/RKN/List.txt${rkn_http_extras} --in-range=-s5556 --payload=all --lua-desync=circular:fails=3:time=60:key=http_rkn:nld=2 --lua-desync=http_methodeol:payload=http_req:dir=out:strategy=1 --lua-desync=syndata:payload=http_req:dir=out:strategy=2 --lua-desync=multisplit:payload=http_req:dir=out:strategy=2 --lua-desync=hostfakesplit:payload=http_req:dir=out:ip_ttl=2:repeats=1:strategy=3 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=4 --lua-desync=fakedsplit:payload=http_req:dir=out:pos=method+2:badsum:strategy=5 --lua-desync=fake:payload=http_req:dir=out:blob=0x0E0E0F0E:tcp_md5:strategy=6 --lua-desync=multisplit:payload=http_req:dir=out:pos=host+1:seqovl=2:strategy=6 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=7 --lua-desync=multisplit:payload=http_req:dir=out:pos=method+2:strategy=7 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=8 --lua-desync=fakedsplit:payload=http_req:dir=out:pos=method+2:ip_autottl=2,1-64:badsum:strategy=8 --in-range=x --new"
+    http_rkn="--filter-tcp=80 $wl_excl --hostlist=${extra_strats_dir}/TCP/RKN/List.txt${rkn_http_extras} --in-range=-s5556 --payload=all --lua-desync=circular:fails=3:time=60:key=http_rkn:nld=0 --lua-desync=http_methodeol:payload=http_req:dir=out:strategy=1 --lua-desync=syndata:payload=http_req:dir=out:strategy=2 --lua-desync=multisplit:payload=http_req:dir=out:strategy=2 --lua-desync=hostfakesplit:payload=http_req:dir=out:ip_ttl=2:repeats=1:strategy=3 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=4 --lua-desync=fakedsplit:payload=http_req:dir=out:pos=method+2:badsum:strategy=5 --lua-desync=fake:payload=http_req:dir=out:blob=0x0E0E0F0E:tcp_md5:strategy=6 --lua-desync=multisplit:payload=http_req:dir=out:pos=host+1:seqovl=2:strategy=6 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=7 --lua-desync=multisplit:payload=http_req:dir=out:pos=method+2:strategy=7 --lua-desync=fake:payload=http_req:dir=out:blob=fake_default_http:badsum:repeats=1:strategy=8 --lua-desync=fakedsplit:payload=http_req:dir=out:pos=method+2:ip_autottl=2,1-64:badsum:strategy=8 --in-range=x --new"
 
+    # HTTP shares the same retrans/reset policy as TLS.
+    http_rkn=$(ensure_circular_doc_args "$http_rkn")
     # HTTP-пул создаётся после общей проводки: подключаем обёртку здесь.
     if [ -f "${ZAPRET2_DIR:-/opt/zapret2}/lua/z2k-alert.lua" ]; then
         http_rkn=$(ensure_rkn_failure_detector "$http_rkn" "z2k_fail_tls_alert")

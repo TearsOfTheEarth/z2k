@@ -5,7 +5,7 @@ dofile('files/lua/z2k-alert.lua')
 dofile('files/lua/z2k-quic-silence.lua')
 local tcp=H.tcp
 H.tcp=function(...)
-    local d=tcp(...); d.arg.failure_detector='z2k_fail_tls_alert'; return d
+    local d=tcp(...); d.arg.failure_detector='z2k_fail_tls_alert'; d.arg.retrans='2'; return d
 end
 local udp=H.udp
 H.udp=function(...)
