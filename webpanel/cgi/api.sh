@@ -581,12 +581,33 @@ case "$method $path" in
         printf ',"entries":%s,"devices":%s,"error":' "$(_wf entries | grep -E '^[0-9]+$' || echo 0)" "$(_wf devices | grep -E '^[0-9]+$' || echo 0)"
         json_string "$(_wf error)"
         printf ',"mem_kb":%s' "$(_wf mem | grep -E '^[0-9]+$' || echo 0)"
+        printf ',"plan":'; json_string "$(_wf plan)"
+        w_pe=false; [ "$(_wf plan_err)" = "1" ] && w_pe=true
+        w_lic=false; [ "$(_wf license)" = "1" ] && w_lic=true
+        printf ',"plan_error":%s,"license":%s' "$w_pe" "$w_lic"
         # Выбор человека, а не то, на чём движок стоит сейчас (это transport
         # выше). Мусор в конфиге показываем автоматом — так его и прочтёт
         # init-скрипт.
         w_mode=$(read_flag "Z2K_WARP_TRANSPORT" "$CONFIG_FILE" "auto")
         case "$w_mode" in wg|h2) ;; *) w_mode=auto ;; esac
         printf ',"transport_mode":"%s"}\n' "$w_mode"
+        exit 0
+        ;;
+
+    # Ключ WARP+. Проверка формы — здесь же, до файла и задачи: всё, что
+    # проходит, безопасно и в файле, и в JSON запроса к Cloudflare.
+    "POST /warp/license")
+        body=$(read_body)
+        l_key=$(form_value "$body" "key")
+        case "$l_key" in
+            ''|*[!A-Za-z0-9-]*) json_fail "400 Bad Request" "key: latin letters, digits and dashes" ;;
+        esac
+        [ "${#l_key}" -ge 8 ] && [ "${#l_key}" -le 64 ] || json_fail "400 Bad Request" "key length 8-64"
+        l_file="/tmp/z2k-warp-license.$$.$(date +%s)"
+        ( umask 077; printf '%s\n' "$l_key" > "$l_file" ) || json_fail "500 Internal Server Error" "save failed"
+        job_id=$(svc_action_async "Применяю ключ WARP+" "warp_license_apply ${l_file}")
+        json_header
+        printf '{"ok":true,"job":'; json_string "$job_id"; printf '}\n'
         exit 0
         ;;
 

@@ -64,6 +64,15 @@ cat > "$SB/bin/z2k-warpd-stub" <<EOF
 echo "\$*" >> "$SB/warpd.log"
 case "\$1" in
     register) [ -f "$SB/reg.fail" ] && { echo "register_blocked boom" >&2; exit 1; }; echo '{"id":"dev"}' > "$SB/etc/device.json"; exit 0 ;;
+    license)
+        cat >> "$SB/license.stdin"; echo >> "$SB/license.stdin"
+        case "\$*" in
+            *--proxy*) [ -f "$SB/lic.proxyfail" ] && { echo "register_blocked relay" >&2; exit 1; } ;;
+            *) [ -f "$SB/lic.directfail" ] && { echo "register_blocked direct" >&2; exit 1; } ;;
+        esac
+        [ -f "$SB/lic.reject" ] && { echo "license_rejected: license: HTTP 400: Invalid license" >&2; exit 3; }
+        echo '{"account_type":"unlimited","premium_data":0,"quota":0,"checked":1}' > "$SB/etc/account.json"
+        echo "account_type=unlimited plus=true"; exit 0 ;;
     version) echo "z2k-warpd test" ;;
 esac
 exit 0
@@ -184,6 +193,29 @@ mkdir -p "$SB/tmp/op.lock"; echo 999999 > "$SB/tmp/op.lock/pid"
 t0=$(date +%s); W disable >/dev/null 2>&1; t1=$(date +%s)
 assert_eq "битый замок: снят без ожидания" "yes" "$([ $((t1 - t0)) -le 2 ] && echo yes || echo no)"
 assert_eq "после действий замок не остаётся" "no" "$([ -d "$SB/tmp/op.lock" ] && echo yes || echo no)"
+
+# ---------- ключ WARP+ ----------
+# Ключ идёт в движок через stdin, не аргументом: аргументы видны в списке
+# процессов и в логе задачи панели.
+clearlogs; rm -f "$SB/license.stdin" "$SB/lic."*
+rc=0; out=$(printf 'AbC12345-dEf67890-GhI13579' | W license 2>&1) || rc=$?
+assert_eq "ключ: применён" "0" "$rc"
+assert_eq "ключ: дошёл до движка через stdin" "AbC12345-dEf67890-GhI13579" "$(head -n1 "$SB/license.stdin")"
+assert_eq "ключ: в аргументах движка его нет" "0" "$(grep -c 'AbC12345' "$SB/warpd.log")"
+assert_eq "ключ: статус показывает тип аккаунта" "plan=unlimited plan_err=0" "$(W status | grep -o 'plan=[a-z]* plan_err=[01]')"
+# Напрямую не вышло — через релей, тем же ключом.
+clearlogs; rm -f "$SB/license.stdin"; touch "$SB/lic.directfail"
+rc=0; printf 'AbC12345-dEf67890-GhI13579' | W license >/dev/null 2>&1 || rc=$?
+assert_eq "ключ через релей: применён" "0" "$rc"
+assert_eq "ключ через релей: вторая попытка шла через --proxy" "1" "$(grep -c -- 'license .*--proxy' "$SB/warpd.log")"
+assert_eq "ключ через релей: оба раза тот же ключ" "2" "$(grep -c 'AbC12345-dEf67890-GhI13579' "$SB/license.stdin")"
+# Отказ Cloudflare через релей не повторяется: ответ был бы тем же.
+clearlogs; rm -f "$SB/lic."*; touch "$SB/lic.reject"
+rc=0; out=$(printf 'bad-key-000' | W license 2>&1) || rc=$?
+assert_eq "отказ Cloudflare: код 3" "3" "$rc"
+assert_eq "отказ Cloudflare: через релей не повторяли" "0" "$(grep -c -- '--proxy' "$SB/warpd.log")"
+assert_eq "отказ Cloudflare: текст отказа виден" "1" "$(printf '%s' "$out" | grep -c 'Invalid license')"
+rm -f "$SB/lic."* "$SB/etc/account.json"
 
 # ---------- enable (no binary) ----------
 clearlogs; W disable >/dev/null 2>&1; clearlogs; mv "$SB/sbin/z2k-warpd" "$SB/sbin/z2k-warpd.off"

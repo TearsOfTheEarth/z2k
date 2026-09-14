@@ -749,6 +749,7 @@ job_reap() {
 _tmp_reap_orphans() {
     local f
     for f in /tmp/z2k-strat-shadow.* /tmp/z2k-strategy-check.* /tmp/z2k-strategy-err.* \
+             /tmp/z2k-warp-license.* \
              "${AU_MANIFEST_CACHE:-/tmp/z2k-au-manifest.json}".new.*; do
         [ -e "$f" ] || continue
         # Проверять надо ВЫВОД find, а не его код возврата: несовпадение по
@@ -876,6 +877,32 @@ warp_transport_set() {
         echo "Прервано: запущено другое действие с WARP"
         return 3
     fi
+    return "$rc"
+}
+
+# Ключ WARP+. Панель кладёт ключ во временный файл с правами 0600, а задача
+# передаёт его скрипту через stdin и файл сразу удаляет: в строке команды
+# задачи ключ стоял бы в списке процессов и в логе, который панель показывает.
+# Путь проверяется по шаблону — функция не должна читать и удалять что угодно.
+warp_license_apply() {
+    local f="$1" out rc msg
+    case "$f" in
+        /tmp/z2k-warp-license.*) ;;
+        *) echo "неверный путь ключа" >&2; return 1 ;;
+    esac
+    [ -f "$f" ] || { echo "ключ не передан — введите его ещё раз" >&2; return 1; }
+    out=$(sh "$WARP_SCRIPT" license < "$f" 2>&1); rc=$?
+    rm -f "$f"
+    [ -n "$out" ] && printf '%s\n' "$out"
+    case "$rc" in
+        0) echo "Ключ применён." ;;
+        2) echo "Это не похоже на ключ WARP+: в нём только латинские буквы, цифры и дефисы." >&2 ;;
+        3)
+            msg=$(printf '%s\n' "$out" | sed -n 's/.*license_rejected: [a-z]*: //p' | tail -n1)
+            echo "Cloudflare не принял ключ: ${msg:-без объяснения}" >&2 ;;
+        4) echo "Сначала установите WARP: ключ привязывается к зарегистрированному устройству." >&2 ;;
+        *) echo "Cloudflare не ответил ни напрямую, ни через релей — попробуйте позже." >&2 ;;
+    esac
     return "$rc"
 }
 

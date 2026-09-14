@@ -149,6 +149,17 @@ export async function renderWarp() {
         </div>
         <p class="desc" id="warp-transport-hint"></p>
       </div>
+      <div class="warp-plus" id="warp-plus" hidden>
+        <label class="t-name" for="warp-plus-key">Ключ WARP+</label>
+        <p class="desc" id="warp-plus-state"></p>
+        <div class="warp-plus-row">
+          <input type="password" id="warp-plus-key" autocomplete="off" autocapitalize="off"
+                 spellcheck="false" maxlength="64" placeholder="xxxxxxxx-xxxxxxxx-xxxxxxxx">
+          <button class="btn" id="warp-plus-apply">Применить ключ</button>
+        </div>
+        <p class="desc">Свой ключ из приложения 1.1.1.1 (Account → Key). Роутер станет одним
+          из устройств вашего аккаунта — у аккаунта их не больше пяти.</p>
+      </div>
       <div class="btn-row" id="warp-actions" style="margin-top:12px;align-items:center;flex-wrap:wrap" hidden>
         <button class="btn btn-primary" id="warp-install-btn" hidden>Установить WARP</button>
         <span class="desc" id="warp-install-note" style="margin:0" hidden>~7 МБ; регистрирует устройство у Cloudflare. Ничего не запускается, пока не включите тумблер.</span>
@@ -222,6 +233,10 @@ export async function renderWarp() {
   document.getElementById("warp-install-btn").addEventListener("click", warpInstall);
   document.getElementById("warp-remove-btn").addEventListener("click", warpRemove);
   document.getElementById("warp-rereg-btn").addEventListener("click", warpReregister);
+  document.getElementById("warp-plus-apply").addEventListener("click", warpLicenseApply);
+  document.getElementById("warp-plus-key").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") warpLicenseApply();
+  });
   document.getElementById("warp-transport-seg").addEventListener("click", (e) => {
     const btn = e.target.closest(".seg-btn");
     if (btn) warpTransportPick(btn.dataset.mode);
@@ -427,6 +442,10 @@ async function loadWarpStatus() {
 
   const transportBox = document.getElementById("warp-transport");
   if (transportBox) transportBox.hidden = !installed;
+  const plusBox = document.getElementById("warp-plus");
+  if (plusBox) plusBox.hidden = !installed;
+  const plusState = document.getElementById("warp-plus-state");
+  if (plusState) plusState.textContent = warpPlanText(d);
   if (!warpActing()) {
     _warpMode = WARP_MODES.some(m => m.id === d.transport_mode) ? d.transport_mode : "auto";
     setWarpMode(_warpMode);
@@ -521,6 +540,54 @@ async function warpTransportPick(mode) {
   warpTrack("Переключаю транспорт WARP", resp.job, (outcome, d) => {
     if (outcome === JOB_FAIL) toast(`Не переключилось: ${jobReason(d)}`, "bad");
     else toast(`Транспорт переключён: ${label}`);
+  });
+}
+
+// Тип аккаунта словами. Признак подписки — account_type: у бесплатной записи
+// Cloudflare тоже отдаёт warp_plus:true (замер 2026-09-14), и на нём панель
+// показала бы WARP+ всем подряд.
+const WARP_PLANS = { free: "бесплатный", limited: "WARP+", unlimited: "WARP+ Unlimited", team: "Zero Trust" };
+
+function warpPlanText(d) {
+  if (d.plan_error) {
+    return "Ключ сохранён, но к новой записи устройства не привязался — введите его и примените ещё раз.";
+  }
+  const plan = WARP_PLANS[d.plan];
+  if (!plan) return d.license ? "Ключ сохранён; тип аккаунта ещё не проверялся." : "Ключ не задан — работает бесплатный WARP.";
+  return `Аккаунт: ${plan}` + (d.license ? ", ключ сохранён." : ".");
+}
+
+// Ключ уходит задачей с модалкой: ответ Cloudflare нужен человеку словами
+// («неверный ключ», «слишком много устройств»), и лог задачи его показывает.
+// Поле очищается сразу после отправки — ключ не должен висеть на странице.
+async function warpLicenseApply() {
+  const input = document.getElementById("warp-plus-key");
+  const btn = document.getElementById("warp-plus-apply");
+  const key = (input.value || "").trim();
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(key)) {
+    toast("Ключ WARP+ — латинские буквы, цифры и дефисы", "bad");
+    input.focus();
+    return;
+  }
+  if (foreignJobsActive("warp") || warpActing()) { toast("Дождитесь завершения текущей операции", "bad"); return; }
+  btn.disabled = true;
+  let resp;
+  try {
+    resp = await apiPost("/warp/license", { key });
+  } catch (e) {
+    btn.disabled = false;
+    toastErr("Ошибка: ", e);
+    return;
+  }
+  input.value = "";
+  openJobModal("Применяю ключ WARP+", resp.job, {
+    onDone: (d) => {
+      btn.disabled = false;
+      const outcome = jobOutcome(d);
+      if (outcome === JOB_FAIL) toast(jobReason(d), "bad");
+      else if (!jobUnresolved(outcome)) toast("Ключ применён");
+      loadWarpStatus();
+    },
   });
 }
 

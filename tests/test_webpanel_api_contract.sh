@@ -207,7 +207,8 @@ WARP_SCRIPT="$SB/warp-stub.sh"; export WARP_SCRIPT
 cat > "$WARP_SCRIPT" <<'WSTUB'
 #!/bin/sh
 case "$1" in
-    status) echo 'installed=1 enabled=1 ready=1 transport=wg endpoint=8.6.112.0:2408 iface=z2ktun0 addr=172.16.0.2 entries=12 devices=2 error= mem=27136' ;;
+    status) echo 'installed=1 enabled=1 ready=1 transport=wg endpoint=8.6.112.0:2408 iface=z2ktun0 addr=172.16.0.2 entries=12 devices=2 error= mem=27136 plan=unlimited plan_err=0 license=1' ;;
+    license) cat > "$LICENSE_GOT" ;;
     ipset)  : ;;
     migrate) mkdir -p "$WARP_LISTS_DIR"; touch "$WARP_LISTS_DIR/.legacy-aggregate-purged" ;;
 esac
@@ -224,6 +225,10 @@ assert_eq "warp/status — iface"                  "z2ktun0"         "$(jget "$O
 assert_eq "warp/status — devices"                "2"               "$(jget "$OUT" 'd["devices"]')"
 assert_eq "warp/status — error пустой"           ""                "$(jget "$OUT" 'd["error"]')"
 assert_eq "warp/status — mem_kb из скрипта"      "27136"           "$(jget "$OUT" 'd["mem_kb"]')"
+assert_eq "warp/status — тип аккаунта"            "unlimited"       "$(jget "$OUT" 'd["plan"]')"
+assert_eq "warp/status — ключ сохранён"           "true"            "$(jget "$OUT" 'd["license"]')"
+assert_eq "warp/status — ошибки привязки нет"     "false"           "$(jget "$OUT" 'd["plan_error"]')"
+
 
 assert_eq "warp/status — выбор транспорта по умолчанию автомат" "auto" "$(jget "$OUT" 'd["transport_mode"]')"
 printf 'ENABLED=1\nGAME_WARP_ENABLED=1\nZ2K_WARP_TRANSPORT=h2\n' > "$CONFIG_FILE"
@@ -249,6 +254,25 @@ printf 'ENABLED=1\nGAME_WARP_ENABLED=0\n' > "$CONFIG_FILE"
 OUT=$(cgi POST /warp/transport "" "$SB/tr.body" | cgi_body)
 assert_eq "warp/transport — у выключенного без задачи" "0" "$(jget "$OUT" '1 if d.get("job") else 0')"
 assert_eq "warp/transport — флаг записан" "1" "$(grep -c '^Z2K_WARP_TRANSPORT=wg$' "$CONFIG_FILE")"
+
+# Ключ WARP+: форма проверяется до файла и задачи; ключ не попадает ни в
+# строку команды задачи, ни в её лог, а временный файл удаляется.
+printf 'key=bad%%22key\n' > "$SB/lic.body"
+OUT=$(cgi POST /warp/license "" "$SB/lic.body")
+assert_contains "warp/license — чужие символы = 400" "400" "$OUT"
+printf 'key=short\n' > "$SB/lic.body"
+OUT=$(cgi POST /warp/license "" "$SB/lic.body")
+assert_contains "warp/license — короткий ключ = 400" "400" "$OUT"
+LICENSE_GOT="$SB/license.got"; export LICENSE_GOT
+rm -f "$SB/license.got"
+printf 'key=AbC12345-dEf67890-GhI13579\n' > "$SB/lic.body"
+OUT=$(cgi POST /warp/license "" "$SB/lic.body" | cgi_body)
+assert_eq "warp/license — задача" "1" "$(jget "$OUT" '1 if d.get("job") else 0')"
+_jid=$(jget "$OUT" 'd.get("job","")'); JOB_IDS="$JOB_IDS $_jid"
+_w=0; while [ ! -f "/tmp/z2k-job-$_jid.exit" ] && [ "$_w" -lt 100 ]; do sleep 0.1; _w=$((_w + 1)); done
+assert_eq "warp/license — ключ дошёл до скрипта через stdin" "AbC12345-dEf67890-GhI13579" "$(head -n1 "$SB/license.got" 2>/dev/null)"
+assert_eq "warp/license — в логе задачи ключа нет" "0" "$(grep -c 'AbC12345' "/tmp/z2k-job-$_jid.log")"
+assert_eq "warp/license — временный файл удалён" "0" "$(ls /tmp/z2k-warp-license.* 2>/dev/null | wc -l | tr -d ' ')"
 printf 'ENABLED=1\nGAME_WARP_ENABLED=1\n' > "$CONFIG_FILE"
 
 OUT=$(cgi POST /warp/install "" | cgi_body)

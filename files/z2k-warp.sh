@@ -653,6 +653,23 @@ warp_restart() {
     warp_enable
 }
 
+# Ключ WARP+ со stdin — в движок тоже через stdin (z2k-warpd license): в
+# аргументах он был бы виден в списке процессов. Сначала напрямую; при сетевом
+# отказе (код 1) — через релей, как регистрация. Отказ Cloudflare (код 3) через
+# релей не повторяем: ответ будет тем же.
+warp_license() {
+    local key out rc
+    [ -x "$WARP_BIN" ] || { _wlog "движок не установлен — нажмите «Установить»"; return 4; }
+    key=$(cat)
+    out=$(printf '%s' "$key" | "$WARP_BIN" license --device "$WARP_DEVICE" 2>&1); rc=$?
+    if [ "$rc" = "1" ] && [ -n "$WARP_VPS_PROXY" ]; then
+        _wlog "напрямую Cloudflare не ответил — пробую через релей..."
+        out=$(printf '%s' "$key" | "$WARP_BIN" license --device "$WARP_DEVICE" --proxy "$WARP_VPS_PROXY" 2>&1); rc=$?
+    fi
+    printf '%s\n' "$out"
+    return "$rc"
+}
+
 warp_remove() {
     warp_disable
     rm -f "$WARP_BIN" "$WARP_BIN".new.* 2>/dev/null
@@ -725,12 +742,22 @@ warp_status() {
     # mem — RSS движка в КБ из status.json: панель показывает его, чтобы «а
     # почему WARP ест сто мегабайт» не требовало htop. В конце строки: error=
     # может быть пустым, и читатели режут строку по ключам, а не по позиции.
-    printf 'installed=%s enabled=%s ready=%s transport=%s endpoint=%s iface=%s addr=%s entries=%s devices=%s error=%s mem=%s\n' \
+    # plan — тип аккаунта из сводки, которую пишет z2k-warpd license (сети
+    # здесь нет: это путь опроса панели); plan_err=1 — ключ сохранён, но к
+    # новой записи устройства не привязался; license=1 — ключ сохранён. Сам
+    # ключ сюда не попадает никогда.
+    local acct plan plan_err=0 lic=0
+    acct="$(dirname "$WARP_DEVICE")/account.json"
+    plan=$(_json_str "$acct" account_type)
+    case "$plan" in *[!a-z_]*) plan="" ;; esac
+    [ -n "$(_json_str "$acct" error)" ] && plan_err=1
+    [ -s "$(dirname "$WARP_DEVICE")/license" ] && lic=1
+    printf 'installed=%s enabled=%s ready=%s transport=%s endpoint=%s iface=%s addr=%s entries=%s devices=%s error=%s mem=%s plan=%s plan_err=%s license=%s\n' \
         "$installed" "${GAME_WARP_ENABLED_OVERRIDE:-$(warp_flag)}" "$ready" \
         "$(_json_str "$WARP_STATUS" transport)" "$(_json_str "$WARP_STATUS" endpoint)" \
         "$(_json_str "$WARP_STATUS" iface)" "$(_json_str "$WARP_STATUS" addr)" \
         "${entries:-0}" "${devices:-0}" "$(_json_str "$WARP_STATUS" last_error)" \
-        "$(_json_raw "$WARP_STATUS" mem_kb)"
+        "$(_json_raw "$WARP_STATUS" mem_kb)" "$plan" "$plan_err" "$lic"
 }
 
 # Зачистка usque-эпохи — по уликам, а не по имени, и пакет — один раз.
@@ -797,10 +824,11 @@ case "$1" in
     enable)   warp_enable ;;
     disable)  warp_disable ;;
     restart)  warp_restart ;;
+    license)  warp_license ;;
     remove)   warp_remove ;;
     ipset)    warp_ipset_all ;;
     selfheal) warp_selfheal ;;
     status)   warp_status ;;
     migrate)  warp_lists_migrate; warp_migrate_usque ;;
-    *) echo "usage: $0 {install|enable|disable|restart|remove|ipset|selfheal|status|migrate}" >&2; exit 1 ;;
+    *) echo "usage: $0 {install|enable|disable|restart|license|remove|ipset|selfheal|status|migrate}" >&2; exit 1 ;;
 esac
