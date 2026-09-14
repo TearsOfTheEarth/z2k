@@ -26,7 +26,7 @@ concurrency:
 env:
   # Тот же тулчейн, которым собирается прод (ci.yml, Makefile). См. пояснение
   # у govulncheck ниже — «инструменту хватит stable» оказалось неверным.
-  GO_VERSION: "1.25.12"
+  GO_VERSION: "1.25.13"
 
 jobs:
   govulncheck:
