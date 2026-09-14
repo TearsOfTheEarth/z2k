@@ -126,10 +126,10 @@ esac
 # Штатные аргументы обязаны уцелеть рядом с проводкой: детектор их использует.
 # Значения — те, что ставит ensure_circular_doc_args по документации.
 case "$RKN" in
-    *retrans=3*inseq=4096*|*inseq=4096*retrans=3*)
+    *retrans=2*inseq=4096*|*inseq=4096*retrans=2*)
         ok "inseq и retrans на месте рядом с детектором" ;;
     *)
-        no "inseq/retrans уцелели" "inseq=4096 и retrans=3" "$RKN" ;;
+        no "inseq/retrans уцелели" "inseq=4096 и retrans=2" "$RKN" ;;
 esac
 
 # HTTP-пул объявляется НИЖЕ блока проводки TLS-пулов, и до 19.08.2026 его туда

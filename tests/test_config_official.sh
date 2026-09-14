@@ -521,11 +521,7 @@ test_padencap_under_flag "1" "1" "rkn_tcp с padencap"
 printf "\n--- штатные детекторы, circular по документации (решение 10.09.2026) ---\n"
 # Своих детекторов нет: ни failure_detector=, ни success_detector= ни в одном
 # пуле. Параметры circular — из docs/manual.md апстрима (standard_*_detector):
-# ПОРОГ ВРЕМЕННО 3, А НЕ 2 (14.09.2026, p-84.12): двойка безопасна только на
-# ядре с привязкой вердикта к поколению, а оно едет полной переустановкой и
-# из-за дефекта апдейтера на флот не приехало. Вернуть 2 тем выпуском, который
-# реально доставит ядро.
-# retrans=3, maxseq=32768, inseq=4096, плюс reset (RST ретрансмиттеру после
+# retrans=2, maxseq=32768, inseq=4096, плюс reset (RST ретрансмиттеру после
 # фиксации неудачи; в автохостлисте у bol-van это умолчание). Окно входящих —
 # -s5556 (inseq 4096 + 1460). QUIC: udp_in=1 по документации, udp_out=5 — по
 # замеру 19.08.2026 (см. комментарий у quic_udp).
@@ -536,12 +532,12 @@ assert_not_contains "нет сторожа обрыва"           "z2k_stall_wa
 for _k in rkn_tcp yt_tcp gv_tcp; do
     _line=$(printf '%s\n' "$_flat_doc" | grep -F "key=$_k" | head -1)
     _circ=$(printf '%s\n' "$_line" | tr ' ' '\n' | grep -- '--lua-desync=circular:' | head -1)
-    assert_contains     "$_k: retrans=3 (порог двух повторов вернут после доставки ядра)" "retrans=3"    "$_circ"
+    assert_contains     "$_k: retrans=2 (экспериментальный порог двух повторов)" "retrans=2"    "$_circ"
     assert_contains     "$_k: maxseq=32768"  "maxseq=32768" "$_circ"
     assert_contains     "$_k: inseq=4096"    "inseq=4096"   "$_circ"
     assert_contains     "$_k: reset"         ":reset"       "$_circ"
     assert_contains     "$_k: fails=3"       "fails=3"      "$_circ"
-    assert_not_contains "$_k: экспериментального retrans=2 сейчас нет" "retrans=2"    "$_circ"
+    assert_not_contains "$_k: нет прежнего retrans=3"    "retrans=3"    "$_circ"
     assert_not_contains "$_k: нет старых maxseq=16384" "maxseq=16384" "$_circ"
     assert_contains     "$_k: окно входящих -s5556"    "--in-range=-s5556" "$_line"
 done
@@ -564,7 +560,7 @@ assert_contains "http_rkn: обёртка проведена и здесь" "fai
 for _k in rkn_tcp yt_tcp gv_tcp; do
     _circ=$(printf '%s\n' "$_flat_doc" | grep -F "key=$_k" | head -1 | tr ' ' '\n' | grep -- '--lua-desync=circular:' | head -1)
     assert_contains "$_k: обёртка детектора проведена" "failure_detector=z2k_fail_tls_alert" "$_circ"
-    assert_contains "$_k: штатные пороги рядом уцелели" "retrans=3"                          "$_circ"
+    assert_contains "$_k: штатные пороги рядом уцелели" "retrans=2"                          "$_circ"
 done
 # Обёртка узнаёт о живости хоста только из вызовов на ВХОДЯЩИХ пакетах.
 # Два условия в профиле это обеспечивают, и оба легко потерять правкой:
@@ -587,14 +583,14 @@ assert_not_contains "yt_quic: TCP-обёртку на UDP не вешаем" "z2
 OUT_DET_NOLUA=$(Z2K_TEST_NO_DETECTOR_LUA=1 run_generator "detect-nolua" "" "_seed_tls_circulars")
 _rkn_nolua=$(get_rkn_tcp_arm_line "$OUT_DET_NOLUA" | tr ' ' '\n' | grep -- '--lua-desync=circular:' | head -1)
 assert_not_contains "без файла модуля детектор не проводится" "failure_detector=" "$_rkn_nolua"
-assert_contains     "без файла модуля штатное на месте"       "retrans=3"        "$_rkn_nolua"
+assert_contains     "без файла модуля штатное на месте"       "retrans=2"        "$_rkn_nolua"
 assert_contains     "http_rkn: fails=3"           "circular:fails=3" "$_http"
 
 # Выключатель RST: Z2K_CIRCULAR_RESET=0 снимает reset, остальное на месте.
 OUT_NORST=$(run_generator "docalign-norst" "Z2K_CIRCULAR_RESET=0" "_seed_tls_circulars")
 _rkn_norst=$(printf '%s\n' "$OUT_NORST" | awk -f "$SCRIPT_DIR/tests/lib/nfqws2_flatten.awk" | grep -F "key=rkn_tcp" | head -1 | tr ' ' '\n' | grep -- '--lua-desync=circular:' | head -1)
 assert_not_contains "Z2K_CIRCULAR_RESET=0: reset снят"      ":reset"   "$_rkn_norst"
-assert_contains     "Z2K_CIRCULAR_RESET=0: retrans=3 остался" "retrans=3" "$_rkn_norst"
+assert_contains     "Z2K_CIRCULAR_RESET=0: retrans=2 остался" "retrans=2" "$_rkn_norst"
 
 # Правленый руками Strategy.txt с чужим детектором и старыми порогами
 # приводится к тому же виду: имя функции, которой нет на диске, роняет движок в
@@ -614,7 +610,7 @@ _dups_det=$(printf '%s' "$_rkn_hand" | grep -o "failure_detector=" | wc -l | tr 
 assert_eq "ручной Strategy.txt: детектор не задвоен" "1" "$_dups_det"
 assert_not_contains "ручной Strategy.txt: inseq=26000 снят"        "inseq=26000"       "$_rkn_hand"
 assert_contains     "ручной Strategy.txt: inseq=4096 поставлен"    "inseq=4096"        "$_rkn_hand"
-assert_contains     "ручной Strategy.txt: retrans=3 поставлен"     "retrans=3"         "$_rkn_hand"
+assert_contains     "ручной Strategy.txt: retrans=2 поставлен"     "retrans=2"         "$_rkn_hand"
 _dups=$(printf '%s' "$_rkn_hand" | grep -o "retrans=" | wc -l | tr -d ' ')
 assert_eq "ручной Strategy.txt: retrans не задвоен" "1" "$_dups"
 
