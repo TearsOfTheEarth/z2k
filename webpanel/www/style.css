@@ -1855,6 +1855,10 @@ input[type=text]:focus, input[type=password]:focus {
 .warp-games .t-name { font-weight: 500; font-size: 13px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .warp-games .t-desc { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .warp-games .switch { flex-shrink: 0; }
+/* Свои списки под игровыми: та же сетка и те же строки, отделены только
+   подзаголовком — это одно действие «пустить через туннель», а не новый раздел. */
+.warp-own { margin-top: var(--space-16); padding-top: var(--space-12); border-top: 1px solid var(--border); }
+.warp-own-title { margin: 0 0 var(--space-4); font-size: 13px; font-weight: 600; color: var(--text); }
 .warp-games .t-name { flex-shrink: 1; }
 .warp-games > .warp-offline { grid-column: 1 / -1; margin-top: 8px; }
 .warp-offline summary { cursor: pointer; font-size: 13px; color: var(--text-muted); padding: 6px 0; }

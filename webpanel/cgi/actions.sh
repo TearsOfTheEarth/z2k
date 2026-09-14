@@ -1621,8 +1621,8 @@ _extra_domains_delete_locked() {
 }
 
 # --- WARP lists (webpanel «WARP» section) ---
-# User-owned IPv4/CIDR lists in $WARP_LISTS_DIR — z2k-warp.sh loads ALL *.txt
-# there into the z2k_warp ipset. Те же правила записи, что и у whitelist:
+# User-owned IPv4/CIDR lists in $WARP_LISTS_DIR — z2k-warp.sh loads every *.txt
+# there that is not switched off in .disabled into the z2k_warp ipset. Те же правила записи, что и у whitelist:
 # наполненный temp подменяет файл целиком через _file_replace (rename, а не
 # «обнулить и залить»), режим и владелец переносятся на новый inode, сервис не
 # перезапускается. After any mutation, if WARP is enabled we rebuild the live
@@ -1902,8 +1902,51 @@ warp_devices_save() {
     return 0
 }
 
+# Выключенные СВОИ списки — имена по строке в lists/warp/.disabled.
+#
+# Отдельный файл, а не общий .enabled с игровыми: свои списки включены по
+# умолчанию (так было всегда, и обновление не должно выключить человеку уже
+# работающие), а игровые — выключены. Разные умолчания в одном файле читались
+# бы по-разному в зависимости от того, в каком каталоге лежит имя, а имена
+# своего и игрового списка могут совпасть.
+WARP_USER_OFF_FILE="${WARP_USER_OFF_FILE:-$WARP_LISTS_DIR/.disabled}"
+
+warp_list_on() {
+    [ -f "$WARP_USER_OFF_FILE" ] || return 0
+    ! grep -qxF "$1" "$WARP_USER_OFF_FILE" 2>/dev/null
+}
+
+warp_list_toggle() {
+    # Под замком по той же причине, что и warp_game_toggle: тумблеры щёлкают
+    # подряд, и два запроса, переписывающие файл целиком, откатывали бы друг
+    # друга.
+    _list_lock "$WARP_USER_OFF_FILE" || { echo "список занят, повторите" >&2; return 1; }
+    _warp_list_toggle_locked "$@"; _rc=$?
+    _list_unlock "$WARP_USER_OFF_FILE"
+    return $_rc
+}
+
+_warp_list_toggle_locked() {
+    # warp_list_toggle <name> <0|1>
+    local name="$1" want="$2" tmp
+    warp_name_ok "$name" || { echo "invalid list name" >&2; return 1; }
+    case "$want" in 0|1) ;; *) echo "value must be 0 or 1" >&2; return 1 ;; esac
+    [ -f "$WARP_LISTS_DIR/$name.txt" ] || { echo "no such list" >&2; return 1; }
+    warp_lists_ensure_dir
+    tmp="${WARP_USER_OFF_FILE}.$$"
+    if [ -f "$WARP_USER_OFF_FILE" ]; then
+        grep -vxF "$name" "$WARP_USER_OFF_FILE" > "$tmp" 2>/dev/null || : > "$tmp"
+    else
+        : > "$tmp"
+    fi
+    [ "$want" = "0" ] && printf '%s\n' "$name" >> "$tmp"
+    mv -f "$tmp" "$WARP_USER_OFF_FILE" || { rm -f "$tmp"; echo "save failed" >&2; return 1; }
+    chmod 644 "$WARP_USER_OFF_FILE" 2>/dev/null
+    return 0
+}
+
 warp_lists() {
-    # TSV на stdout: name<TAB>entries<TAB>size<TAB>mtime (name без .txt).
+    # TSV на stdout: name<TAB>entries<TAB>size<TAB>mtime<TAB>on (name без .txt).
     warp_lists_ensure_dir
     local f name entries size mtime
     for f in "$WARP_LISTS_DIR"/*.txt; do
@@ -1914,7 +1957,8 @@ warp_lists() {
         size=$(wc -c < "$f" | tr -d ' ')
         # busybox: date -r (no stat -c), see update_status_string
         mtime=$(date -r "$f" +%s 2>/dev/null)
-        printf '%s\t%s\t%s\t%s\n' "$name" "${entries:-0}" "${size:-0}" "${mtime:-0}"
+        printf '%s\t%s\t%s\t%s\t%s\n' "$name" "${entries:-0}" "${size:-0}" "${mtime:-0}" \
+            "$(warp_list_on "$name" && echo 1 || echo 0)"
     done
 }
 
@@ -2111,6 +2155,15 @@ warp_list_delete() {
     # которого и так больше нет.
     [ -f "$file" ] || return 0
     rm -f "$file" || { echo "delete failed" >&2; return 1; }
+    # Отметку «выключен» уносим вместе со списком: новый список с тем же именем
+    # должен родиться включённым, как любой новый, а не унаследовать чужой выбор.
+    if [ -f "$WARP_USER_OFF_FILE" ] && grep -qxF "$name" "$WARP_USER_OFF_FILE" 2>/dev/null; then
+        _list_lock "$WARP_USER_OFF_FILE" && {
+            grep -vxF "$name" "$WARP_USER_OFF_FILE" > "$WARP_USER_OFF_FILE.$$" 2>/dev/null || : > "$WARP_USER_OFF_FILE.$$"
+            mv -f "$WARP_USER_OFF_FILE.$$" "$WARP_USER_OFF_FILE" || rm -f "$WARP_USER_OFF_FILE.$$"
+            _list_unlock "$WARP_USER_OFF_FILE"
+        }
+    fi
     warp_ipset_reload_if_enabled
     return 0
 }

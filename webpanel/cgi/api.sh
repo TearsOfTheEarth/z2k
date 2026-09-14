@@ -894,12 +894,13 @@ case "$method $path" in
         json_header
         printf '{"ok":true,"lists":['
         first=1
-        warp_lists | while IFS="$(printf '\t')" read -r wname wentries wsize wmtime; do
+        warp_lists | while IFS="$(printf '\t')" read -r wname wentries wsize wmtime won; do
             [ -z "$wname" ] && continue
             if [ "$first" = "1" ]; then first=0; else printf ','; fi
             printf '{"name":'; json_string "$wname"
-            printf ',"entries":%s,"size":%s,"mtime":%s}' \
-                "${wentries:-0}" "${wsize:-0}" "${wmtime:-0}"
+            [ "$won" = "0" ] || won=1
+            printf ',"entries":%s,"size":%s,"mtime":%s,"on":%s}' \
+                "${wentries:-0}" "${wsize:-0}" "${wmtime:-0}" "$won"
         done
         printf ']}\n'
         exit 0
@@ -951,6 +952,24 @@ case "$method $path" in
         w_inv=$(printf '%s' "$result" | sed -n 's/.*skipped_invalid=\([0-9]*\).*/\1/p')
         json_header
         printf '{"ok":true,"saved":%d,"skipped_invalid":%d}\n' "${w_saved:-0}" "${w_inv:-0}"
+        exit 0
+        ;;
+
+    # Свой список: включить или выключить, не удаляя. Применяется сразу —
+    # тем же пересбором сета, что и правка списка.
+    "POST /warp/list/toggle")
+        body=$(read_body)
+        l_name=$(form_value "$body" "name")
+        l_val=$(form_value "$body" "value")
+        case "$l_val" in
+            0|1) ;;
+            *) json_fail "400 Bad Request" "value must be 0 or 1" ;;
+        esac
+        warp_list_toggle "$l_name" "$l_val" || json_fail "400 Bad Request" "toggle failed"
+        warp_ipset_reload_if_enabled
+        json_header
+        printf '{"ok":true,"name":'; json_string "$l_name"
+        printf ',"on":%s}\n' "$l_val"
         exit 0
         ;;
 

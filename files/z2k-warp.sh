@@ -119,6 +119,9 @@ warp_daemon_running() { [ -x "$WARP_INIT" ] && sh "$WARP_INIT" status >/dev/null
 # whatever the user had switched off.
 WARP_GAMES_DIR="${WARP_GAMES_DIR:-$WARP_LISTS_DIR/games}"
 WARP_ENABLED_FILE="${WARP_ENABLED_FILE:-$WARP_LISTS_DIR/.enabled}"
+# Свои списки, наоборот, включены по умолчанию; выключенные человеком
+# перечислены в .disabled (см. warp_list_toggle в webpanel/cgi/actions.sh).
+WARP_USER_OFF_FILE="${WARP_USER_OFF_FILE:-$WARP_LISTS_DIR/.disabled}"
 
 warp_lists_migrate() {
     [ -d "$WARP_LISTS_DIR" ] || mkdir -p "$WARP_LISTS_DIR" || {
@@ -146,16 +149,20 @@ warp_lists_migrate() {
     return 0
 }
 
-# Echo the files to load: every user list, plus each enabled game list that
-# actually exists. A name in .enabled with no file behind it (upstream dropped
-# it, or the refresh has not run yet) is simply skipped.
+# Echo the files to load: every user list not switched off, plus each enabled
+# game list that actually exists. A name in .enabled with no file behind it
+# (upstream dropped it, or the refresh has not run yet) is simply skipped.
 warp_active_lists() {
     local f n
     for f in "$WARP_LISTS_DIR"/*.txt; do
         # devices.txt — список УСТРОЙСТВ (источников), он грузится в z2k_warp_src
         # отдельно; сюда, в адреса назначения, ему нельзя.
         [ "$f" = "$WARP_DEVICES_FILE" ] && continue
-        [ -f "$f" ] && printf '%s\n' "$f"
+        [ -f "$f" ] || continue
+        if [ -f "$WARP_USER_OFF_FILE" ] && grep -qxF "$(basename "$f" .txt)" "$WARP_USER_OFF_FILE" 2>/dev/null; then
+            continue
+        fi
+        printf '%s\n' "$f"
     done
     [ -f "$WARP_ENABLED_FILE" ] || return 0
     while IFS= read -r n; do

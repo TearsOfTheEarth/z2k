@@ -95,6 +95,10 @@ export async function renderWarp() {
         чтения; свои адреса добавляйте ниже, отдельным списком.
       </p>
       <div id="warp-games" class="warp-games">${skeletonBlocks(3)}</div>
+      <div class="warp-own" id="warp-own" hidden>
+        <h4 class="warp-own-title">Свои списки</h4>
+        <div id="warp-own-list" class="warp-games"></div>
+      </div>
     </div>
     <div class="card" id="warp-devices-card" hidden>
       <h3>Устройства</h3>
@@ -118,7 +122,8 @@ export async function renderWarp() {
       <p class="desc">
         Каждый список — текстовый файл: один IPv4-адрес или CIDR-подсеть на строку
         (<code>203.0.113.7</code> или <code>203.0.113.0/24</code>; строки с <code>#</code> —
-        комментарии). Через WARP идёт трафик ко всем адресам из всех списков.
+        комментарии). Через WARP идёт трафик ко всем адресам из включённых списков;
+        включают и выключают их тумблеры в карточке выше.
         <b>Изменения применяются сразу</b>, без перезапуска, и переживают
         переустановку z2k.
       </p>
@@ -260,8 +265,8 @@ async function loadWarpGames() {
   const on = games.filter(g => g.enabled === 1 || g.enabled === "1").length;
   host.innerHTML = `
     <p class="desc" id="warp-games-summary">${on === 0
-      ? "Сейчас не включён ни один список — через туннель не идёт ничего."
-      : `Включено списков: ${on} из ${games.length}.`}</p>
+      ? "Не включён ни один игровой список."
+      : `Включено игровых списков: ${on} из ${games.length}.`}</p>
     ${games.map(g => `
       <div class="toggle-row" data-game="${escapeHtml(g.name)}">
         <div class="t-text">
@@ -631,6 +636,7 @@ async function loadWarpLists() {
     const d = await apiGet("/warp/lists");
     if (_stale("warpLists", seq)) return;
     _warpLists = d.lists || [];
+    renderOwnToggles(_warpLists);
     if (!_warpLists.length) {
       list.innerHTML = `<li style="color:var(--text-muted)">(нет списков — создайте новый или импортируйте .txt)</li>`;
       return;
@@ -639,7 +645,7 @@ async function loadWarpLists() {
       <li>
         <span class="warp-item">
           <span class="warp-item-name">${escapeHtml(l.name)}.txt</span>
-          <span class="warp-item-meta">${addrs(l.entries)} · ${fmtSize(l.size)}${Number(l.mtime) > 0 ? " · изменён " + humanAgo(Number(l.mtime)) : ""}</span>
+          <span class="warp-item-meta">${addrs(l.entries)} · ${fmtSize(l.size)}${Number(l.mtime) > 0 ? " · изменён " + humanAgo(Number(l.mtime)) : ""}${listOn(l) ? "" : " · выключен"}</span>
         </span>
         <span class="warp-item-actions">
           <button class="btn-icon" title="Редактировать" aria-label="Редактировать ${escapeHtml(l.name)}" data-edit="${escapeHtml(l.name)}">${_icons.edit}</button>
@@ -661,6 +667,52 @@ async function loadWarpLists() {
     if (_stale("warpLists", seq)) return;
     list.innerHTML = `<li style="color:var(--bad)">${errHtml(e)}</li>`;
   }
+}
+
+// Свой список включён, пока его явно не выключили: старый роутер поля «on»
+// не отдаёт, и все его списки работают — так их и показываем.
+function listOn(l) { return !(l.on === 0 || l.on === "0"); }
+
+// Тумблеры своих списков — под игровыми, в той же карточке и той же разметкой:
+// «что идёт через туннель» человек включает в одном месте. Редактирование,
+// импорт и удаление остаются в карточке «Списки адресов».
+function renderOwnToggles(lists) {
+  const box = document.getElementById("warp-own");
+  const host = document.getElementById("warp-own-list");
+  if (!box || !host) return;
+  box.hidden = !lists.length;
+  host.innerHTML = lists.map(l => `
+      <div class="toggle-row" data-own="${escapeHtml(l.name)}">
+        <div class="t-text">
+          <div class="t-name" title="${escapeHtml(l.name)}">${escapeHtml(l.name)}</div>
+          <div class="t-desc">${addrs(l.entries)}</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" ${listOn(l) ? "checked" : ""} aria-label="Список ${escapeHtml(l.name)} через WARP">
+          <span class="slider"></span>
+        </label>
+      </div>`).join("");
+  host.querySelectorAll("[data-own] input").forEach(cb => {
+    cb.addEventListener("change", () => warpOwnToggle(cb));
+  });
+}
+
+async function warpOwnToggle(box) {
+  const row = box.closest("[data-own]");
+  const name = row.getAttribute("data-own");
+  const wanted = box.checked ? "1" : "0";
+  box.disabled = true;
+  try {
+    await apiPost("/warp/list/toggle", { name, value: wanted });
+  } catch (e) {
+    box.checked = !box.checked;
+    toastErr("Ошибка: ", e);
+    box.disabled = false;
+    return;
+  }
+  box.disabled = false;
+  toast(wanted === "1" ? `${name} включён` : `${name} выключен`);
+  loadWarpLists();
 }
 
 async function warpEditOpen(name, prefill) {
