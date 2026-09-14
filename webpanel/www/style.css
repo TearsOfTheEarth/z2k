@@ -1834,6 +1834,16 @@ input[type=text]:focus, input[type=password]:focus {
 /* Выбор транспорта — под статусом, в той же карточке: статус говорит, на чём
    туннель стоит сейчас, а переключатель — на чём ему стоять. Подсказка под
    ним меняется вместе с выбором и говорит, чем он обернётся на плохой линии. */
+/* Идущее действие с туннелем. Не модалка: под ней остались бы недоступны
+   тумблер и выбор транспорта, которыми зависшее действие и прерывают. */
+.warp-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  margin: var(--space-8) 0 0;
+  max-width: 64ch;
+}
+.warp-pending .status-ico { flex: 0 0 auto; color: var(--text-muted); line-height: 0; margin-top: 2px; }
 .warp-transport { margin-top: var(--space-16); }
 .warp-transport .t-name { font-weight: 500; }
 .warp-transport .segmented { flex-wrap: wrap; }

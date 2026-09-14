@@ -85,7 +85,8 @@ printf '1.2.3.0/24\n' > "$SB/z2k/lists/warp/my.txt"
 W() { # запуск скрипта с окружением песочницы
     Z2K_STUB_PATH="$SB/bin" ZAPRET2_DIR="$SB/z2k" CONFIG_FILE="$SB/z2k/config" \
     WARP_BIN="$SB/sbin/z2k-warpd" WARP_INIT="$SB/bin/S51" WARP_DEVICE="$SB/etc/device.json" \
-    WARP_STATUS="$SB/tmp/status.json" WARP_LISTS_DIR="$SB/z2k/lists/warp" WARP_READY_WAIT=1 \
+    WARP_STATUS="$SB/tmp/status.json" WARP_LISTS_DIR="$SB/z2k/lists/warp" WARP_READY_WAIT="${RW:-1}" \
+    WARP_OP_LOCK_WAIT="${LW:-5}" \
     WARP_LOG="$SB/tmp/engine.log" \
     WARP_FETCH_STUB="$SB/bin/z2k-warpd-stub" \
     sh "$SB/z2k/z2k-warp.sh" "$@"
@@ -137,6 +138,52 @@ assert_eq "enable not-ready: rc 2" "2" "$rc"
 assert_eq "enable not-ready: flag stays 1" "1" "$(flag)"
 assert_eq "enable not-ready: reason code on stderr" "1" "$(printf '%s' "$out" | grep -c no_endpoint)"
 assert_eq "enable not-ready: no MARK rules" "0" "$(grep -c -- '-A PREROUTING' "$SB/ipt.log" 2>/dev/null || echo 0)"
+
+# ---------- новое действие перебивает зависшее ----------
+# Включение ждёт готовности до WARP_READY_WAIT. Пока оно висело, выключить WARP
+# или выбрать другой транспорт было нельзя — теперь последнее нажатие главнее.
+clearlogs; ready false no_endpoint; W disable >/dev/null 2>&1; clearlogs
+( rc=0; RW=60 W enable >/dev/null 2>&1 || rc=$?; echo "$rc" > "$SB/bg.rc" ) &
+bg=$!
+sleep 2
+t0=$(date +%s)
+rc=0; W disable >/dev/null 2>&1 || rc=$?
+wait "$bg"
+t1=$(date +%s)
+assert_eq "перебивка: выключение прошло" "0" "$rc"
+assert_eq "перебивка: зависшее включение вышло с кодом 3" "3" "$(cat "$SB/bg.rc")"
+assert_eq "перебивка: включение ушло за секунды, а не дождалось конца" "yes" "$([ $((t1 - t0)) -le 6 ] && echo yes || echo no)"
+assert_eq "перебивка: флаг выключен" "0" "$(flag)"
+assert_eq "перебивка: движок остановлен последним" "stop" "$(tail -n1 "$SB/s51.log")"
+assert_eq "перебивка: маршрут не поднят" "0" "$(cat "$SB/ipt.log" 2>/dev/null | grep -c -- '-A PREROUTING')"
+
+# Смена транспорта поверх зависшего включения: включение уступает, туннель
+# перезапускается.
+clearlogs; ready false no_endpoint
+( rc=0; RW=60 W enable >/dev/null 2>&1 || rc=$?; echo "$rc" > "$SB/bg.rc" ) &
+bg=$!
+sleep 2
+rc=0; W restart >/dev/null 2>&1 || rc=$?
+wait "$bg"
+assert_eq "перебивка рестартом: включение вышло с кодом 3" "3" "$(cat "$SB/bg.rc")"
+assert_eq "перебивка рестартом: сам рестарт дошёл до конца (не ready → 2)" "2" "$rc"
+assert_eq "перебивка рестартом: флаг остался включён" "1" "$(flag)"
+
+# Застрявший держатель замка — жив, но не отпускает. Новое действие ждёт
+# WARP_OP_LOCK_WAIT, снимает его и делает своё.
+clearlogs
+sleep 60 & stuck=$!
+mkdir -p "$SB/tmp/op.lock"; echo "$stuck" > "$SB/tmp/op.lock/pid"; echo "$stuck" > "$SB/tmp/op"
+rc=0; LW=1 W disable >/dev/null 2>&1 || rc=$?
+assert_eq "застрявший замок: выключение прошло" "0" "$rc"
+assert_eq "застрявший замок: держатель снят" "dead" "$(kill -0 "$stuck" 2>/dev/null && echo alive || echo dead)"
+assert_eq "застрявший замок: флаг выключен" "0" "$(flag)"
+kill "$stuck" 2>/dev/null
+# Держатель умер, не сняв замок, — замок битый, ждать нечего.
+mkdir -p "$SB/tmp/op.lock"; echo 999999 > "$SB/tmp/op.lock/pid"
+t0=$(date +%s); W disable >/dev/null 2>&1; t1=$(date +%s)
+assert_eq "битый замок: снят без ожидания" "yes" "$([ $((t1 - t0)) -le 2 ] && echo yes || echo no)"
+assert_eq "после действий замок не остаётся" "no" "$([ -d "$SB/tmp/op.lock" ] && echo yes || echo no)"
 
 # ---------- enable (no binary) ----------
 clearlogs; W disable >/dev/null 2>&1; clearlogs; mv "$SB/sbin/z2k-warpd" "$SB/sbin/z2k-warpd.off"

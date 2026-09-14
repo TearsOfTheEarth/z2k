@@ -2,7 +2,7 @@ import { apiGet, apiGetText, apiPost, apiPostText, errHtml, toastErr } from "../
 import { $app, _icons, escapeHtml, humanAgo, skeletonBlocks, skeletonLines, statusIcon } from "../core/dom.js";
 import { _newLoad, _stale } from "../core/loadorder.js";
 import { toast } from "../core/toast.js";
-import { JOB_FAIL, _activeJobs, _updateGlobalUILock, awaitPanelBack, jobOutcome, jobUnresolved, openJobModal, unresolvedMsg } from "../job.js";
+import { JOB_FAIL, _updateGlobalUILock, awaitPanelBack, foreignJobsActive, jobOutcome, jobUnresolved, openJobModal, setLockAware, trackJob, unresolvedMsg } from "../job.js";
 
 // Раздел «WARP»: туннель Cloudflare WARP на нашем движке z2k-warpd
 // (WireGuard, при полном UDP-блоке — MASQUE по TCP 443). Три действия —
@@ -23,6 +23,75 @@ const WARP_MODES = [
     hint: "Только MASQUE через TCP 443. Трафик идёт поверх TCP, поэтому на линии с потерями он медленнее WireGuard." },
 ];
 let _warpMode = "auto";
+
+// Текущее действие с туннелем (включение, выключение, смена транспорта).
+// Новое нажатие не ждёт старое: сервер прерывает предыдущее (код 3), а панель
+// просто перестаёт слушать его итог — владеет состоянием последнее нажатие.
+let _warpJob = null;
+let _warpJobTitle = "";
+let _warpReqs = 0;          // запросы, ещё не получившие id задачи
+let _warpPoll = null;       // перечитывание статуса, пока действие идёт
+
+function warpReqBegin() { _warpReqs++; }
+function warpReqEnd() { _warpReqs = Math.max(0, _warpReqs - 1); }
+function warpActing() { return !!_warpJob || _warpReqs > 0; }
+
+// Последняя содержательная строка лога задачи — для тоста о неудаче: модалки
+// с логом у этих действий нет, а причина нужна сразу. Рамки и отметки
+// времени обёртки задачи (svc_action_async) пропускаются.
+function jobReason(d) {
+  const lines = String((d && d.log) || "").split("\n").map(l => l.trim())
+    .filter(l => l && !/^─+$/.test(l) && !/^\[\d\d:\d\d:\d\d\]/.test(l));
+  return lines.length ? lines[lines.length - 1].replace(/^\[z2k-warp\]\s*/, "") : "причина в логе задачи";
+}
+
+function warpPendingUI() {
+  const el = document.getElementById("warp-pending");
+  if (el) {
+    el.hidden = !_warpJob;
+    if (_warpJob) {
+      // Подсказка — ровно о том, что стало можно: не ждать, а перебить.
+      el.innerHTML = `<span class="status-ico">${_icons.hourglass}</span>${escapeHtml(_warpJobTitle)}… ` +
+        "Если зависло — выключите тумблер или выберите другой транспорт, это прервёт текущее действие.";
+    }
+  }
+  clearInterval(_warpPoll);
+  _warpPoll = null;
+  if (_warpJob) {
+    _warpPoll = setInterval(() => {
+      if (!document.getElementById("warp-status-grid")) { clearInterval(_warpPoll); _warpPoll = null; return; }
+      loadWarpStatus();
+    }, 3000);
+  }
+}
+
+// Запуск действия без модалки. onFinal зовётся только для ПОСЛЕДНЕГО
+// действия: итог перебитого никого не интересует, и откатывать по нему
+// тумблер значило бы отменить нажатие, которое его перебило.
+function warpTrack(title, jobId, onFinal) {
+  _warpJob = jobId;
+  _warpJobTitle = title;
+  warpPendingUI();
+  trackJob(title, jobId, {
+    lockGroup: "warp",
+    onDone: (d) => {
+      if (_warpJob !== jobId) return;
+      _warpJob = null;
+      warpPendingUI();
+      const outcome = jobOutcome(d);
+      if (jobUnresolved(outcome)) {
+        const m = unresolvedMsg(outcome);
+        if (m) toast(m, "bad");
+        awaitPanelBack().then(() => loadWarpStatus());
+        return;
+      }
+      // Код 3 у последнего действия — его перебили из другой вкладки или с
+      // другого устройства. Сказать нечего, состояние перечитаем.
+      if (!(d && d.exit === 3)) onFinal(outcome, d);
+      loadWarpStatus();
+    },
+  });
+}
 
 // Коды last_error движка → текст. Движок пишет код, панель — смысл.
 const WARP_ERRORS = {
@@ -59,7 +128,7 @@ function fmtSize(b) {
 export async function renderWarp() {
   $app.innerHTML = `
     <h1 class="page-title">WARP</h1>
-    <div class="card">
+    <div class="card" data-lock-group="warp">
       <div class="toggle-row" data-key="game_warp">
         <div class="t-text">
           <div class="t-name">WARP-туннель</div>
@@ -71,6 +140,7 @@ export async function renderWarp() {
           <span class="slider"></span>
         </label>
       </div>
+      <p class="desc warp-pending" id="warp-pending" role="status" hidden></p>
       <div class="status-grid" id="warp-status-grid" hidden></div>
       <div class="warp-transport" id="warp-transport" hidden>
         <div class="t-name" id="warp-transport-label">Выбор транспорта</div>
@@ -343,23 +413,24 @@ async function loadWarpStatus() {
   document.getElementById("warp-devices-card").hidden = false;
 
   const box = $app.querySelector('[data-key="game_warp"] input');
+  // ПОКА ДЕЙСТВИЕ ИДЁТ, ТУМБЛЕР И ВЫБОР ТРАНСПОРТА ПОКАЗЫВАЮТ НАЖАТОЕ, А НЕ
+  // КОНФИГ. Статус перечитывается каждые три секунды, а флаг в конфиге
+  // меняется не сразу: выключение пишет его последним шагом. Синхронизация
+  // «всегда» возвращала тумблер во «вкл» через секунду после того, как его
+  // выключили, — ровно в тот момент, когда им прерывают зависшее включение.
   if (box) {
-    // Checked-состояние синкаем ВСЕГДА. С disabled аккуратнее: если сейчас
-    // идёт job, свитч залочен _updateGlobalUILock'ом — не раслочиваем его в
-    // обход лока, а поправляем lockBackup, чтобы разлочка после job'а
-    // вернула enabled.
-    box.checked = enabled;
-    if (_activeJobs.size) {
-      if (box.dataset.lockBackup !== undefined) box.dataset.lockBackup = "0";
-    } else {
-      box.disabled = false;
-    }
+    if (!warpActing()) box.checked = enabled;
+    // Под чужой задачей тумблер заперт замком — правим его запомненное
+    // состояние, а не .disabled напрямую (иначе снятие замка вернёт старое).
+    setLockAware(box, false);
   }
 
   const transportBox = document.getElementById("warp-transport");
   if (transportBox) transportBox.hidden = !installed;
-  _warpMode = WARP_MODES.some(m => m.id === d.transport_mode) ? d.transport_mode : "auto";
-  setWarpMode(_warpMode);
+  if (!warpActing()) {
+    _warpMode = WARP_MODES.some(m => m.id === d.transport_mode) ? d.transport_mode : "auto";
+    setWarpMode(_warpMode);
+  }
 
   if (!installed) {
     grid.innerHTML = "";
@@ -421,54 +492,35 @@ function setWarpMode(mode) {
   if (hint && m) hint.textContent = m.hint;
 }
 
-// Смена транспорта у включённого WARP перезапускает движок — это задача с
-// модалкой, как у тумблера, и туннель на секунды пропадает. У выключенного
-// сохраняется только выбор, ждать нечего. Отказ возвращает прежний выбор:
-// переключатель не должен показывать то, что не применилось.
+// Смена транспорта у включённого WARP перезапускает движок — задача без
+// модалки, со значком в углу; туннель на секунды пропадает. У выключенного
+// сохраняется только выбор, ждать нечего. Нажатие во время идущего действия
+// его прерывает (см. warpTrack).
 async function warpTransportPick(mode) {
   if (!WARP_MODES.some(m => m.id === mode) || mode === _warpMode) return;
-  if (_activeJobs.size) { toast("Дождитесь завершения текущей операции", "bad"); return; }
-  const seg = document.getElementById("warp-transport-seg");
-  const prev = _warpMode;
-  const buttons = seg ? Array.from(seg.querySelectorAll(".seg-btn")) : [];
+  if (foreignJobsActive("warp")) { toast("Дождитесь завершения текущей операции", "bad"); return; }
   const label = (WARP_MODES.find(m => m.id === mode) || {}).label;
+  _warpMode = mode;
   setWarpMode(mode);
-  buttons.forEach(b => { b.disabled = true; });
-  const unlock = () => buttons.forEach(b => { b.disabled = false; });
+  warpReqBegin();
   let resp;
   try {
     resp = await apiPost("/warp/transport", { value: mode });
   } catch (e) {
-    unlock();
-    setWarpMode(prev);
+    warpReqEnd();
     toastErr("Ошибка: ", e);
+    loadWarpStatus();
     return;
   }
-  // Текущий выбор после ответа берём из статуса, а не присваиваем здесь:
-  // правду о записанном флаге знает роутер.
+  warpReqEnd();
   if (!resp || !resp.job) {
-    unlock();
     toast(`Выбран ${label}. Применится при включении WARP`);
     loadWarpStatus();
     return;
   }
-  openJobModal("Переключаю транспорт WARP", resp.job, {
-    onDone: (d) => {
-      unlock();
-      const outcome = jobOutcome(d);
-      if (outcome === JOB_FAIL) {
-        setWarpMode(prev);
-        toast("Не переключилось — причина в логе выше", "bad");
-      } else if (jobUnresolved(outcome)) {
-        const m = unresolvedMsg(outcome);
-        if (m) toast(m, "bad");
-        awaitPanelBack().then(() => loadWarpStatus());
-        return;
-      } else {
-        toast(`Транспорт переключён: ${label}`);
-      }
-      loadWarpStatus();
-    },
+  warpTrack("Переключаю транспорт WARP", resp.job, (outcome, d) => {
+    if (outcome === JOB_FAIL) toast(`Не переключилось: ${jobReason(d)}`, "bad");
+    else toast(`Транспорт переключён: ${label}`);
   });
 }
 
@@ -587,44 +639,33 @@ async function warpDevicesSave() {
   }
 }
 
-// Аналог toggleClick, но со своим onDone: после переключения обновляем
-// статус-грид раздела (туннель/ipset), а не дашборд.
+// Включение и выключение туннеля. Без модалки и без замка на тумблере: если
+// включение зависло, его прерывают тем же тумблером (или выбором транспорта).
+// .disabled — только на время самого запроса, id задачи приходит за доли
+// секунды; класс .loading не ставится, он снимает с тумблера клики.
 async function warpToggle(box) {
-  const sw = box.closest(".switch");
   const wanted = box.checked ? "1" : "0";
-  sw.classList.add("loading");
   box.disabled = true;
+  warpReqBegin();
   let resp;
   try {
     resp = await apiPost("/toggle/game-warp", { value: wanted });
   } catch (e) {
+    warpReqEnd();
     box.checked = !box.checked;
     box.disabled = false;
-    sw.classList.remove("loading");
     toastErr("Ошибка: ", e);
     return;
   }
-  openJobModal((wanted === "1" ? "Включаю" : "Отключаю") + " WARP-туннель", resp.job, {
-    onDone: (d) => {
-      sw.classList.remove("loading");
-      box.disabled = false;
-      const outcome = jobOutcome(d);
-      if (outcome === JOB_FAIL) {
-        box.checked = !box.checked;
-        toast("Не включилось — причина в логе выше", "bad");
-      } else if (jobUnresolved(outcome)) {
-        // Не знаем, чем кончилось — не откатываем чекбокс и не врём.
-        // loadWarpStatus сам вернёт фактическое состояние, когда панель
-        // снова ответит.
-        const m = unresolvedMsg(outcome);
-        if (m) toast(m, "bad");
-        awaitPanelBack().then(() => loadWarpStatus());
-        return;
-      } else {
-        toast(wanted === "1" ? "Включено" : "Выключено");
-      }
-      loadWarpStatus();
-    },
+  warpReqEnd();
+  box.disabled = false;
+  warpTrack((wanted === "1" ? "Включаю" : "Отключаю") + " WARP-туннель", resp.job, (outcome, d) => {
+    if (outcome === JOB_FAIL) {
+      box.checked = wanted !== "1";
+      toast((wanted === "1" ? "Не включилось: " : "Не выключилось: ") + jobReason(d), "bad");
+    } else {
+      toast(wanted === "1" ? "Включено" : "Выключено");
+    }
   });
 }
 

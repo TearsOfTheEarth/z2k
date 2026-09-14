@@ -523,23 +523,95 @@ warp_unpin_legacy() {
     return 0
 }
 
+# ---- действия с туннелем перебивают друг друга ---------------------------------
+#
+# Включение ждёт готовности до WARP_READY_WAIT секунд, смена транспорта — столько
+# же после перезапуска. Пока одно такое ожидание висело, панель держала весь
+# раздел под замком: ни выключить, ни выбрать другой транспорт человек не мог,
+# хотя именно это и нужно, когда включение не поднимается.
+#
+# Теперь ПОСЛЕДНЕЕ действие главнее. Каждое записывает свой pid в WARP_OP_FILE;
+# ожидание готовности сверяет его на каждом круге и, увидев чужой, выходит с
+# кодом 3 ничего больше не трогая. Короткие участки, меняющие состояние (флаг,
+# демон, маршрут), идут под замком: иначе прерванное включение могло бы
+# запустить демон уже после того, как выключение его остановило. Держатель
+# замка, которого перебили, прав на продолжение не имеет — если он застрял,
+# новое действие его снимает.
+WARP_OP_DIR="${WARP_OP_DIR:-$(dirname "$WARP_STATUS")}"
+WARP_OP_FILE="$WARP_OP_DIR/op"
+WARP_OP_LOCK="$WARP_OP_DIR/op.lock"
+WARP_OP_LOCK_WAIT="${WARP_OP_LOCK_WAIT:-5}"   # секунд ждать застрявшего держателя
+
+warp_op_begin() {
+    mkdir -p "$WARP_OP_DIR" 2>/dev/null
+    printf '%s\n' "$$" > "$WARP_OP_FILE"
+}
+
+# Всё ещё ли это действие последнее.
+warp_op_current() { [ "$(cat "$WARP_OP_FILE" 2>/dev/null)" = "$$" ]; }
+
+warp_op_lock() {
+    local waited=0 holder
+    while ! mkdir "$WARP_OP_LOCK" 2>/dev/null; do
+        holder=$(cat "$WARP_OP_LOCK/pid" 2>/dev/null)
+        # Держатель умер, не сняв замок (его убили вместе с задачей) — замок битый.
+        if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+            rm -rf "$WARP_OP_LOCK" 2>/dev/null
+            continue
+        fi
+        if [ "$waited" -ge "$WARP_OP_LOCK_WAIT" ]; then
+            # Снимать чужой замок вправе только последнее действие. Перебитое
+            # само уступает: иначе старое выключение, застав новое включение в
+            # долгом участке, убило бы его и выключило туннель вопреки
+            # последнему нажатию.
+            warp_op_current || return 1
+            # Застрял — и уже перебит нами: снимаем его вместе с замком.
+            if [ -n "$holder" ] && [ "$holder" != "$$" ]; then
+                _wlog "предыдущее действие с WARP не отвечает (pid $holder) — прерываю"
+                kill "$holder" 2>/dev/null
+            fi
+            rm -rf "$WARP_OP_LOCK" 2>/dev/null
+            continue
+        fi
+        sleep 1; waited=$((waited + 1))
+    done
+    printf '%s\n' "$$" > "$WARP_OP_LOCK/pid"
+    return 0
+}
+
+warp_op_unlock() { rm -rf "$WARP_OP_LOCK" 2>/dev/null; return 0; }
+
+warp_op_superseded() {
+    _wlog "прервано: запущено другое действие с WARP"
+    return 3
+}
+
 warp_enable() {
+    warp_op_begin
+    warp_op_lock || { warp_op_superseded; return 3; }
+    warp_op_current || { warp_op_unlock; warp_op_superseded; return 3; }
     warp_set_flag 1
     warp_unpin_legacy
-    [ -x "$WARP_BIN" ] || { _wlog "движок не установлен — нажмите «Установить»"; warp_set_flag 0; return 1; }
+    [ -x "$WARP_BIN" ] || { _wlog "движок не установлен — нажмите «Установить»"; warp_set_flag 0; warp_op_unlock; return 1; }
     warp_ipset_all
-    ipset list -n "$WARP_IPSET" >/dev/null 2>&1 || { _wlog "cannot create ipset $WARP_IPSET"; warp_set_flag 0; return 1; }
+    ipset list -n "$WARP_IPSET" >/dev/null 2>&1 || { _wlog "cannot create ipset $WARP_IPSET"; warp_set_flag 0; warp_op_unlock; return 1; }
     warp_daemon_running || sh "$WARP_INIT" start >/dev/null 2>&1
+    warp_op_unlock
     local waited=0
     while [ "$waited" -lt "$WARP_READY_WAIT" ]; do
+        warp_op_current || { warp_op_superseded; return 3; }
         warp_ready && break
         sleep 2; waited=$((waited + 2))
     done
+    warp_op_lock || { warp_op_superseded; return 3; }
+    warp_op_current || { warp_op_unlock; warp_op_superseded; return 3; }
     if warp_ready; then
         warp_pbr_up
+        warp_op_unlock
         _wlog "WARP ready: $(_json_str "$WARP_STATUS" transport) $(_json_str "$WARP_STATUS" endpoint)"
         return 0
     fi
+    warp_op_unlock
     # Не ready — так и говорим. Подбор плеча десинка отсюда УДАЛЁН: туннель не
     # имеет права крутить ротацию обхода ради себя, а брошенный подбор оставлял
     # хост закреплённым навсегда. Движок ищет рабочий транспорт сам, лестницей.
@@ -547,23 +619,37 @@ warp_enable() {
     return 2
 }
 
+# Выключение — выход из любого зависшего состояния: оно короткое и снимает
+# застрявшего держателя замка. Перебитым оно бывает, только если после него
+# уже нажали что-то ещё — тогда главнее то нажатие.
 warp_disable() {
+    warp_op_begin
+    warp_op_lock || { warp_op_superseded; return 3; }
+    warp_op_current || { warp_op_unlock; warp_op_superseded; return 3; }
     warp_unpin_legacy
     warp_pbr_down
     [ -x "$WARP_INIT" ] && sh "$WARP_INIT" stop >/dev/null 2>&1
     warp_set_flag 0
+    warp_op_unlock
     return 0
 }
 
 # Перезапуск движка с новыми настройками — смена транспорта в панели.
 # Маршрут снимается ДО остановки: пока движок встаёт заново, трафик идёт
 # напрямую, а не в интерфейс, которого уже нет. Дальше — обычное включение со
-# своим ожиданием готовности и теми же кодами 0/1/2. У выключенного WARP
+# своим ожиданием готовности и теми же кодами 0/1/2/3. У выключенного WARP
 # перезапускать нечего: выбор применится при включении.
 warp_restart() {
-    [ "$(warp_flag)" = "1" ] || return 0
+    warp_op_begin
+    warp_op_lock || { warp_op_superseded; return 3; }
+    warp_op_current || { warp_op_unlock; warp_op_superseded; return 3; }
+    if [ "$(warp_flag)" != "1" ]; then
+        warp_op_unlock
+        return 0
+    fi
     warp_pbr_down
     [ -x "$WARP_INIT" ] && sh "$WARP_INIT" stop >/dev/null 2>&1
+    warp_op_unlock
     warp_enable
 }
 
