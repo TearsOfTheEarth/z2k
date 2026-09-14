@@ -109,6 +109,11 @@ jobs:
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Версия прибита ЯВНО, хотя совпадает с умолчанием action. Синтаксис
+          # исключений в .gitleaks.toml зависит от неё ([allowlist] до 8.25,
+          # [[allowlists]] после), и тихий переезд умолчания при бампе action
+          # сделал бы конфиг нечитаемым — скан снова утонул бы в шуме.
+          GITLEAKS_VERSION: "8.24.3"
 
   codeql:
     name: CodeQL (${{ matrix.language }})
