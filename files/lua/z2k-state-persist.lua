@@ -307,6 +307,9 @@ local allowed_hostkey_funcs = {
   sld_hostkey = true,
   tld_hostkey = true,
   z2k_nohost_key = true,
+  -- The generated domain pools use this helper; persistence must derive the
+  -- same host record as circular for saves, restoration and operator pins.
+  z2k_service_hostkey = true,
 }
 
 local function get_hostkey_func(desync)

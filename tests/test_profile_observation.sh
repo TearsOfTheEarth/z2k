@@ -24,4 +24,6 @@ for reset in 1 0; do
     awk -f tests/lib/nfqws2_flatten.awk "$TMP/raw" > "$TMP/flat-$reset"
 done
 export Z2K_PROFILE_FIXTURE="$TMP/flat-1" Z2K_PROFILE_NO_RESET="$TMP/flat-0"
+mkdir -p "$TMP/state" "$TMP/fallback"
+export Z2K_STATE_DIR_OVERRIDE="$TMP/state" Z2K_AUTOCIRCULAR_FALLBACK_OVERRIDE="$TMP/fallback"
 "${LUA:-lua}" tests/test_profile_observation.lua

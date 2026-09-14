@@ -127,4 +127,69 @@ H.test('GV slot 11 is distinct while the existing 1..22 numbering is retained',f
     H.eq('1',slot6.seqovl); H.eq(nil,slot11.seqovl)
     H.eq(slot6.pos,slot11.pos)
 end)
+-- Exercise persistence with the hostkey arguments emitted by the real generator.
+-- Testing the key helper and persistence separately misses a rejected helper.
+dofile('files/lua/z2k-state-persist.lua')
+local P=z2k_state_persist
+local state_path=assert(os.getenv('Z2K_STATE_DIR_OVERRIDE'))..'/state.tsv'
+local function fresh_state()
+    os.remove(state_path)
+    P._reset()
+end
+local function disk_strategy(key,host)
+    local f=io.open(state_path)
+    if not f then return nil end
+    local result
+    for line in f:lines() do
+        local k,h,n=line:match('^([^\t]+)\t([^\t]+)\t(%d+)')
+        if k==key and h==host then result=tonumber(n) end
+    end
+    f:close()
+    return result
+end
+local function profile_initial(key,host)
+    local d
+    if key=='yt_quic' then d=H.qstart(H.track(host))
+    elseif key=='http_rkn' then d=H.tcp(H.track(host),true,1,'GET / HTTP/1.1\r\n\r\n','http_req')
+    else d=H.tcp(H.track(host),true,1,H.client,'tls_client_hello') end
+    d.arg=circular_instance(key).arg
+    return d
+end
+H.test('generated host keys persist the selected strategy for every domain pool',function()
+    fresh_state()
+    for _,key in ipairs({'rkn_tcp','yt_tcp','gv_tcp','http_rkn','yt_quic'}) do
+        local host=key=='gv_tcp' or key=='yt_quic'
+        host=host and 'rr1.googlevideo.com' or 'api.example.co.uk'
+        local d=profile_initial(key,host)
+        local h=H.step(d)
+        h.nstrategy=2
+        H.step(profile_initial(key,host))
+        P.flush()
+        H.eq(2,disk_strategy(key,z2k_service_hostkey(d)))
+    end
+end)
+H.test('generated host keys restore a frozen selection before executing a strategy',function()
+    fresh_state()
+    local f=assert(io.open(state_path,'w'))
+    f:write('yt_tcp\tapi.example.co.uk|4\t2\t1000\tfrozen\n')
+    f:close()
+    local h=H.step(profile_initial('yt_tcp','api.example.co.uk'))
+    H.eq(2,H.executed)
+    H.eq(2,h.nstrategy)
+    H.eq(2,h.final)
+    -- The IPv4 pin must not seed the separate IPv6 record.
+    local d=profile_initial('yt_tcp','api.example.co.uk')
+    d.dis.ip=nil; d.dis.ip6={}
+    h=H.step(d)
+    H.eq(1,h.nstrategy)
+    H.eq(nil,h.final)
+end)
+H.test('generated QUIC profile persists a timer rotation without another packet',function()
+    fresh_state()
+    local h
+    for i=1,3 do h=H.step(profile_initial('yt_quic','rr2.googlevideo.com')) end
+    H.advance(6)
+    H.eq(2,h.nstrategy)
+    H.eq(2,disk_strategy('yt_quic','googlevideo.com|4'))
+end)
 H.finish()
