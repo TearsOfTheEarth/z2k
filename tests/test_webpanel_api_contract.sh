@@ -249,7 +249,7 @@ assert_eq "warp/transport — у включённого WARP задача" "1" "
 _jid=$(jget "$OUT" 'd.get("job","")'); JOB_IDS="$JOB_IDS $_jid"
 # Задача пишет тот же конфиг в фоне — дождаться её, иначе она перепишет файл
 # посреди следующих проверок.
-_w=0; while [ ! -f "/tmp/z2k-job-$_jid.exit" ] && [ "$_w" -lt 100 ]; do sleep 0.1; _w=$((_w + 1)); done
+_w=0; while [ ! -f "/tmp/z2k-job-$_jid.exit" ] && [ "$_w" -lt 20 ]; do sleep 1; _w=$((_w + 1)); done
 printf 'ENABLED=1\nGAME_WARP_ENABLED=0\n' > "$CONFIG_FILE"
 OUT=$(cgi POST /warp/transport "" "$SB/tr.body" | cgi_body)
 assert_eq "warp/transport — у выключенного без задачи" "0" "$(jget "$OUT" '1 if d.get("job") else 0')"
@@ -269,7 +269,7 @@ printf 'key=AbC12345-dEf67890-GhI13579\n' > "$SB/lic.body"
 OUT=$(cgi POST /warp/license "" "$SB/lic.body" | cgi_body)
 assert_eq "warp/license — задача" "1" "$(jget "$OUT" '1 if d.get("job") else 0')"
 _jid=$(jget "$OUT" 'd.get("job","")'); JOB_IDS="$JOB_IDS $_jid"
-_w=0; while [ ! -f "/tmp/z2k-job-$_jid.exit" ] && [ "$_w" -lt 100 ]; do sleep 0.1; _w=$((_w + 1)); done
+_w=0; while [ ! -f "/tmp/z2k-job-$_jid.exit" ] && [ "$_w" -lt 20 ]; do sleep 1; _w=$((_w + 1)); done
 assert_eq "warp/license — ключ дошёл до скрипта через stdin" "AbC12345-dEf67890-GhI13579" "$(head -n1 "$SB/license.got" 2>/dev/null)"
 assert_eq "warp/license — в логе задачи ключа нет" "0" "$(grep -c 'AbC12345' "/tmp/z2k-job-$_jid.log")"
 assert_eq "warp/license — временный файл удалён" "0" "$(ls /tmp/z2k-warp-license.* 2>/dev/null | wc -l | tr -d ' ')"

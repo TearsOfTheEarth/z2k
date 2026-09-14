@@ -33,7 +33,7 @@ run_utils() { sh -c ". '$SB/fn.sh'; z2k_ensure_cli_link '$SB/zd/z2k.sh'"; }
 run_au()    { sh -c "au_log() { :; }; ZAPRET2_DIR='$SB/zd'; . '$SB/fn.sh'; au_ensure_cli_link"; }
 
 for impl in utils au; do
-    rm -rf "$SB/bin"
+    rm -rf "${SB:?}/bin"
     "run_$impl"; rc=$?
     check "$impl: нет каталога и ссылки — создаёт оба" "$SB/zd/z2k.sh" "$(readlink "$SB/bin/z2k" 2>/dev/null)"
     [ "$impl" = utils ] && check "$impl: код 0 при успехе" "0" "$rc"
