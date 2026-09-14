@@ -548,6 +548,18 @@ warp_disable() {
     return 0
 }
 
+# Перезапуск движка с новыми настройками — смена транспорта в панели.
+# Маршрут снимается ДО остановки: пока движок встаёт заново, трафик идёт
+# напрямую, а не в интерфейс, которого уже нет. Дальше — обычное включение со
+# своим ожиданием готовности и теми же кодами 0/1/2. У выключенного WARP
+# перезапускать нечего: выбор применится при включении.
+warp_restart() {
+    [ "$(warp_flag)" = "1" ] || return 0
+    warp_pbr_down
+    [ -x "$WARP_INIT" ] && sh "$WARP_INIT" stop >/dev/null 2>&1
+    warp_enable
+}
+
 warp_remove() {
     warp_disable
     rm -f "$WARP_BIN" "$WARP_BIN".new.* 2>/dev/null
@@ -691,10 +703,11 @@ case "$1" in
     install)  warp_install ;;
     enable)   warp_enable ;;
     disable)  warp_disable ;;
+    restart)  warp_restart ;;
     remove)   warp_remove ;;
     ipset)    warp_ipset_all ;;
     selfheal) warp_selfheal ;;
     status)   warp_status ;;
     migrate)  warp_lists_migrate; warp_migrate_usque ;;
-    *) echo "usage: $0 {install|enable|disable|remove|ipset|selfheal|status|migrate}" >&2; exit 1 ;;
+    *) echo "usage: $0 {install|enable|disable|restart|remove|ipset|selfheal|status|migrate}" >&2; exit 1 ;;
 esac

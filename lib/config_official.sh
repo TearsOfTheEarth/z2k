@@ -1949,6 +1949,9 @@ create_official_config() {
     # Регенерацию вызывает любой другой тумблер панели и само ночное
     # обновление, поэтому выключение не переживало ни одного цикла.
     local saved_Z2K_AUTO_UPDATE_ENABLED="1"
+    # Транспорт WARP, выбранный в панели. Та же механика пропажи, что выше:
+    # без этой строки выбор сбрасывался бы в автомат любым тумблером.
+    local saved_Z2K_WARP_TRANSPORT="auto"
     if [ -f "$config_file" ]; then
         saved_GAME_WARP_ENABLED=$(safe_config_read "GAME_WARP_ENABLED" "$config_file" "0")
         saved_TG_PROXY_USER_DISABLED=$(safe_config_read "TG_PROXY_USER_DISABLED" "$config_file" "0")
@@ -2010,6 +2013,9 @@ create_official_config() {
         saved_Z2K_PPE_DEOFFLOAD_QUIC=$(safe_config_read "Z2K_PPE_DEOFFLOAD_QUIC" "$config_file" "1")
         saved_Z2K_PANEL_AUTH=$(safe_config_read "Z2K_PANEL_AUTH" "$config_file" "0")
         saved_Z2K_AUTO_UPDATE_ENABLED=$(safe_config_read "Z2K_AUTO_UPDATE_ENABLED" "$config_file" "1")
+        saved_Z2K_WARP_TRANSPORT=$(safe_config_read "Z2K_WARP_TRANSPORT" "$config_file" "auto")
+        # В heredoc значение уходит без кавычек — пропускаем только известное.
+        case "$saved_Z2K_WARP_TRANSPORT" in wg|h2) ;; *) saved_Z2K_WARP_TRANSPORT=auto ;; esac
     fi
 
     # NFQWS2_TCP_PKT_IN — глубина наблюдения за ответом, см. z2k_reply_pkt_cap.
@@ -2417,6 +2423,7 @@ Z2K_PPE_DEOFFLOAD=${saved_Z2K_PPE_DEOFFLOAD}
 Z2K_PPE_DEOFFLOAD_QUIC=${saved_Z2K_PPE_DEOFFLOAD_QUIC}
 Z2K_PANEL_AUTH=${saved_Z2K_PANEL_AUTH}
 Z2K_AUTO_UPDATE_ENABLED=${saved_Z2K_AUTO_UPDATE_ENABLED}
+Z2K_WARP_TRANSPORT=${saved_Z2K_WARP_TRANSPORT}
 
 # Persist the branch URL that this install was booted from, so that
 # z2k-update-lists.sh and other post-install tools (cron-driven) can

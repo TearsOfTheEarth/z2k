@@ -580,8 +580,34 @@ case "$method $path" in
         printf ',"addr":';     json_string "$(_wf addr)"
         printf ',"entries":%s,"devices":%s,"error":' "$(_wf entries | grep -E '^[0-9]+$' || echo 0)" "$(_wf devices | grep -E '^[0-9]+$' || echo 0)"
         json_string "$(_wf error)"
-        printf ',"mem_kb":%s}\n' "$(_wf mem | grep -E '^[0-9]+$' || echo 0)"
+        printf ',"mem_kb":%s' "$(_wf mem | grep -E '^[0-9]+$' || echo 0)"
+        # Выбор человека, а не то, на чём движок стоит сейчас (это transport
+        # выше). Мусор в конфиге показываем автоматом — так его и прочтёт
+        # init-скрипт.
+        w_mode=$(read_flag "Z2K_WARP_TRANSPORT" "$CONFIG_FILE" "auto")
+        case "$w_mode" in wg|h2) ;; *) w_mode=auto ;; esac
+        printf ',"transport_mode":"%s"}\n' "$w_mode"
         exit 0
+        ;;
+
+    # Выбор транспорта. У включённого WARP — задача с перезапуском движка,
+    # у выключенного — просто запись флага, без задачи и без модалки: ждать
+    # там нечего.
+    "POST /warp/transport")
+        body=$(read_body)
+        val=$(form_value "$body" "value")
+        case "$val" in
+            auto|wg|h2) ;;
+            *) json_fail "400 Bad Request" "value must be auto, wg or h2" ;;
+        esac
+        if [ "$(read_flag "GAME_WARP_ENABLED" "$CONFIG_FILE" "0")" = "1" ]; then
+            job_id=$(svc_action_async "Переключаю транспорт WARP" "warp_transport_set ${val}")
+            json_header
+            printf '{"ok":true,"job":'; json_string "$job_id"; printf '}\n'
+            exit 0
+        fi
+        set_flag "Z2K_WARP_TRANSPORT" "$val" "$CONFIG_FILE" || json_fail "500 Internal Server Error" "save failed"
+        json_ok
         ;;
 
     # Установка/удаление движка — долгие (скачивание ~7 МБ, регистрация у

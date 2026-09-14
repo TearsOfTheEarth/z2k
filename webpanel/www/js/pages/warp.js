@@ -11,6 +11,19 @@ import { JOB_FAIL, _activeJobs, _updateGlobalUILock, awaitPanelBack, jobOutcome,
 // свои) и целые устройства по IP/MAC. Всё — файлы в /opt/zapret2/lists/warp/.
 let _warpLists = [];
 
+// Транспорт туннеля: автомат или выбор вручную. Порядок — от умолчания к
+// частным случаям. Подсказка говорит, чем выбор обернётся на плохой линии:
+// ради этого выбор и делают.
+const WARP_MODES = [
+  { id: "auto", label: "Автоматически",
+    hint: "Сначала WireGuard, если его режут — MASQUE через TCP 443. На MASQUE раз в 10 минут проверяется, не заработал ли WireGuard снова." },
+  { id: "wg", label: "WireGuard",
+    hint: "Только WireGuard, на MASQUE не переключается. Если провайдер режет WireGuard, туннель не поднимется." },
+  { id: "h2", label: "MASQUE",
+    hint: "Только MASQUE через TCP 443. Трафик идёт поверх TCP, поэтому на линии с потерями он медленнее WireGuard." },
+];
+let _warpMode = "auto";
+
 // Коды last_error движка → текст. Движок пишет код, панель — смысл.
 const WARP_ERRORS = {
   register_blocked: "Cloudflare не отвечает на регистрацию — ни напрямую, ни через релей. Попробуйте позже.",
@@ -59,6 +72,13 @@ export async function renderWarp() {
         </label>
       </div>
       <div class="status-grid" id="warp-status-grid" hidden></div>
+      <div class="warp-transport" id="warp-transport" hidden>
+        <div class="t-name" id="warp-transport-label">Выбор транспорта</div>
+        <div class="segmented" id="warp-transport-seg" role="radiogroup" aria-labelledby="warp-transport-label">
+          ${WARP_MODES.map(m => `<button type="button" class="seg-btn" data-mode="${m.id}" role="radio" aria-checked="false">${m.label}</button>`).join("")}
+        </div>
+        <p class="desc" id="warp-transport-hint"></p>
+      </div>
       <div class="btn-row" id="warp-actions" style="margin-top:12px;align-items:center;flex-wrap:wrap" hidden>
         <button class="btn btn-primary" id="warp-install-btn" hidden>Установить WARP</button>
         <span class="desc" id="warp-install-note" style="margin:0" hidden>~7 МБ; регистрирует устройство у Cloudflare. Ничего не запускается, пока не включите тумблер.</span>
@@ -127,6 +147,10 @@ export async function renderWarp() {
   document.getElementById("warp-install-btn").addEventListener("click", warpInstall);
   document.getElementById("warp-remove-btn").addEventListener("click", warpRemove);
   document.getElementById("warp-rereg-btn").addEventListener("click", warpReregister);
+  document.getElementById("warp-transport-seg").addEventListener("click", (e) => {
+    const btn = e.target.closest(".seg-btn");
+    if (btn) warpTransportPick(btn.dataset.mode);
+  });
   document.getElementById("warp-devices-save").addEventListener("click", warpDevicesSave);
   document.getElementById("warp-new-btn").addEventListener("click", warpNewList);
   document.getElementById("warp-import-btn").addEventListener("click", () => {
@@ -327,6 +351,11 @@ async function loadWarpStatus() {
     }
   }
 
+  const transportBox = document.getElementById("warp-transport");
+  if (transportBox) transportBox.hidden = !installed;
+  _warpMode = WARP_MODES.some(m => m.id === d.transport_mode) ? d.transport_mode : "auto";
+  setWarpMode(_warpMode);
+
   if (!installed) {
     grid.innerHTML = "";
     return;
@@ -341,6 +370,11 @@ async function loadWarpStatus() {
   } else if (!enabled) {
     tunnelValue = "выключен";
     tunnelKind = "";
+  } else if (d.error === "no_endpoint" && _warpMode !== "auto") {
+    // Выбран один транспорт — и молчит именно он. «Провайдер блокирует WARP
+    // целиком» здесь было бы неправдой: второй транспорт никто не пробовал.
+    tunnelValue = "На выбранном транспорте ни один адрес Cloudflare не отвечает — попробуйте «Автоматически».";
+    tunnelKind = "bad";
   } else if (d.error) {
     tunnelValue = WARP_ERRORS[d.error] || d.error;
     tunnelKind = "bad";
@@ -367,6 +401,70 @@ async function loadWarpStatus() {
     const icon = statusIcon(c.kind);
     return `<div class="status-cell ${c.kind}"><div class="label">${c.label}</div><div class="value">${icon ? `<span class="status-ico">${icon}</span>` : ""}${escapeHtml(c.value)}</div></div>`;
   }).join("");
+}
+
+function setWarpMode(mode) {
+  const seg = document.getElementById("warp-transport-seg");
+  if (!seg) return;
+  seg.querySelectorAll(".seg-btn").forEach(b => {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle("seg-on", on);
+    b.setAttribute("aria-checked", String(on));
+  });
+  const hint = document.getElementById("warp-transport-hint");
+  const m = WARP_MODES.find(x => x.id === mode);
+  if (hint && m) hint.textContent = m.hint;
+}
+
+// Смена транспорта у включённого WARP перезапускает движок — это задача с
+// модалкой, как у тумблера, и туннель на секунды пропадает. У выключенного
+// сохраняется только выбор, ждать нечего. Отказ возвращает прежний выбор:
+// переключатель не должен показывать то, что не применилось.
+async function warpTransportPick(mode) {
+  if (!WARP_MODES.some(m => m.id === mode) || mode === _warpMode) return;
+  if (_activeJobs.size) { toast("Дождитесь завершения текущей операции", "bad"); return; }
+  const seg = document.getElementById("warp-transport-seg");
+  const prev = _warpMode;
+  const buttons = seg ? Array.from(seg.querySelectorAll(".seg-btn")) : [];
+  const label = (WARP_MODES.find(m => m.id === mode) || {}).label;
+  setWarpMode(mode);
+  buttons.forEach(b => { b.disabled = true; });
+  const unlock = () => buttons.forEach(b => { b.disabled = false; });
+  let resp;
+  try {
+    resp = await apiPost("/warp/transport", { value: mode });
+  } catch (e) {
+    unlock();
+    setWarpMode(prev);
+    toastErr("Ошибка: ", e);
+    return;
+  }
+  // Текущий выбор после ответа берём из статуса, а не присваиваем здесь:
+  // правду о записанном флаге знает роутер.
+  if (!resp || !resp.job) {
+    unlock();
+    toast(`Выбран ${label}. Применится при включении WARP`);
+    loadWarpStatus();
+    return;
+  }
+  openJobModal("Переключаю транспорт WARP", resp.job, {
+    onDone: (d) => {
+      unlock();
+      const outcome = jobOutcome(d);
+      if (outcome === JOB_FAIL) {
+        setWarpMode(prev);
+        toast("Не переключилось — причина в логе выше", "bad");
+      } else if (jobUnresolved(outcome)) {
+        const m = unresolvedMsg(outcome);
+        if (m) toast(m, "bad");
+        awaitPanelBack().then(() => loadWarpStatus());
+        return;
+      } else {
+        toast(`Транспорт переключён: ${label}`);
+      }
+      loadWarpStatus();
+    },
+  });
 }
 
 // Установить / Удалить — долгие действия, идут job'ом с модалкой, как

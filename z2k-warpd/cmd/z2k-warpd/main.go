@@ -165,6 +165,12 @@ func cmdRun(args []string) int {
 	stPath := fs.String("status", defaultStatus, "status.json")
 	logPath := fs.String("log", defaultLog, "лог (tmpfs)")
 	force := fs.String("force-transport", "", "wg:PORT | wg:HOST:PORT | h2 — только этот шаг")
+	// Режим — через переменную окружения по умолчанию, а не только флагом.
+	// Init-скрипт экспортирует её из конфига; движок старой сборки её просто
+	// не видит и работает автоматом. Флаг, переданный старому движку, уронил
+	// бы его на разборе аргументов — и человек, выбравший транспорт до
+	// обновления бинарника, остался бы без WARP вовсе.
+	modeArg := fs.String("transport", os.Getenv("Z2K_WARP_TRANSPORT"), "auto | wg | h2 — какими транспортами ходить")
 	proxy := fs.String("proxy", os.Getenv("Z2K_WARP_VPS_PROXY"), "HTTPS-прокси (VPS-релей) для API, если напрямую заблокирован")
 	epPath := fs.String("endpoints", defaultEndpoints, "список запасных эндпоинтов")
 	verbose := fs.Bool("v", false, "подробный лог")
@@ -220,6 +226,14 @@ func cmdRun(args []string) int {
 			}
 			return nil, fmt.Errorf("unknown transport %q", step.Transport)
 		},
+	}
+	mode, modeOK := ladder.ParseMode(*modeArg)
+	if !modeOK {
+		logf("неизвестный режим транспорта %q — работаю автоматически", *modeArg)
+	}
+	cfg.Mode = mode
+	if mode != ladder.ModeAuto {
+		logf("транспорт выбран вручную: %s", mode)
 	}
 	if *force != "" {
 		s, err := parseForce(*force)

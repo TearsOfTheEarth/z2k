@@ -225,6 +225,32 @@ assert_eq "warp/status — devices"                "2"               "$(jget "$O
 assert_eq "warp/status — error пустой"           ""                "$(jget "$OUT" 'd["error"]')"
 assert_eq "warp/status — mem_kb из скрипта"      "27136"           "$(jget "$OUT" 'd["mem_kb"]')"
 
+assert_eq "warp/status — выбор транспорта по умолчанию автомат" "auto" "$(jget "$OUT" 'd["transport_mode"]')"
+printf 'ENABLED=1\nGAME_WARP_ENABLED=1\nZ2K_WARP_TRANSPORT=h2\n' > "$CONFIG_FILE"
+OUT=$(cgi GET /warp/status "" | cgi_body)
+assert_eq "warp/status — выбор транспорта из конфига" "h2" "$(jget "$OUT" 'd["transport_mode"]')"
+printf 'ENABLED=1\nGAME_WARP_ENABLED=1\nZ2K_WARP_TRANSPORT=udp"x\n' > "$CONFIG_FILE"
+OUT=$(cgi GET /warp/status "" | cgi_body)
+assert_eq "warp/status — мусор в выборе транспорта = автомат" "auto" "$(jget "$OUT" 'd["transport_mode"]')"
+
+# Выбор транспорта: у включённого WARP — задача, у выключенного — только флаг.
+printf 'value=bogus\n' > "$SB/tr.body"
+OUT=$(cgi POST /warp/transport "" "$SB/tr.body")
+assert_contains "warp/transport — чужое значение = 400" "400" "$OUT"
+printf 'value=wg\n' > "$SB/tr.body"
+printf 'ENABLED=1\nGAME_WARP_ENABLED=1\n' > "$CONFIG_FILE"
+OUT=$(cgi POST /warp/transport "" "$SB/tr.body" | cgi_body)
+assert_eq "warp/transport — у включённого WARP задача" "1" "$(jget "$OUT" '1 if d.get("job") else 0')"
+_jid=$(jget "$OUT" 'd.get("job","")'); JOB_IDS="$JOB_IDS $_jid"
+# Задача пишет тот же конфиг в фоне — дождаться её, иначе она перепишет файл
+# посреди следующих проверок.
+_w=0; while [ ! -f "/tmp/z2k-job-$_jid.exit" ] && [ "$_w" -lt 100 ]; do sleep 0.1; _w=$((_w + 1)); done
+printf 'ENABLED=1\nGAME_WARP_ENABLED=0\n' > "$CONFIG_FILE"
+OUT=$(cgi POST /warp/transport "" "$SB/tr.body" | cgi_body)
+assert_eq "warp/transport — у выключенного без задачи" "0" "$(jget "$OUT" '1 if d.get("job") else 0')"
+assert_eq "warp/transport — флаг записан" "1" "$(grep -c '^Z2K_WARP_TRANSPORT=wg$' "$CONFIG_FILE")"
+printf 'ENABLED=1\nGAME_WARP_ENABLED=1\n' > "$CONFIG_FILE"
+
 OUT=$(cgi POST /warp/install "" | cgi_body)
 assert_eq "warp/install — валидный JSON с job" "1" "$(jget "$OUT" '1 if d.get("job") else 0')"
 OUT=$(cgi POST /warp/remove "" | cgi_body)

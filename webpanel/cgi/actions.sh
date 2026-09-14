@@ -832,6 +832,29 @@ toggle_game_warp() {
     fi
 }
 
+# Транспорт WARP, выбранный в панели: auto | wg | h2. Флаг пишется всегда,
+# движок перезапускается только у включённого WARP. Код 2 от restart — не
+# ошибка: выбор сохранён, туннель на новом транспорте ещё поднимается, и
+# причина видна в статусе раздела (тот же контракт, что у toggle_game_warp).
+warp_transport_set() {
+    local mode="$1" rc
+    case "$mode" in
+        auto|wg|h2) ;;
+        *) echo "неизвестный транспорт: $mode" >&2; return 1 ;;
+    esac
+    set_flag "Z2K_WARP_TRANSPORT" "$mode" "$CONFIG_FILE" || return 1
+    if [ "$(read_flag "GAME_WARP_ENABLED" "$CONFIG_FILE" "0")" != "1" ] || [ ! -f "$WARP_SCRIPT" ]; then
+        echo "Сохранено. Применится при включении WARP."
+        return 0
+    fi
+    sh "$WARP_SCRIPT" restart; rc=$?
+    if [ "$rc" = "2" ]; then
+        echo "Туннель на выбранном транспорте ещё не поднялся — причина в статусе раздела WARP. Движок продолжает попытки в фоне." >&2
+        return 0
+    fi
+    return "$rc"
+}
+
 # Установка движка: скачать бинарь под арку, зарегистрировать устройство.
 # Ничего не запускает — это делает тумблер. Удаление: всё кроме device.json.
 warp_install_action() { sh "$WARP_SCRIPT" install; }

@@ -1831,6 +1831,15 @@ input[type=text]:focus, input[type=password]:focus {
   margin-top: 12px;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
+/* Выбор транспорта — под статусом, в той же карточке: статус говорит, на чём
+   туннель стоит сейчас, а переключатель — на чём ему стоять. Подсказка под
+   ним меняется вместе с выбором и говорит, чем он обернётся на плохой линии. */
+.warp-transport { margin-top: var(--space-16); }
+.warp-transport .t-name { font-weight: 500; }
+.warp-transport .segmented { flex-wrap: wrap; }
+.warp-transport .seg-btn:disabled { cursor: progress; opacity: 0.7; }
+.warp-transport .desc { margin: var(--space-8) 0 0; max-width: 64ch; }
+
 
 /* Игровые списки: 22 строки по 58px делали страницу нечитаемой. Компактная
    строка — имя и счётчик в одну линию, на ширине ≥720px в две колонки. */
