@@ -734,6 +734,19 @@ au_step_regen_strategies() {
         generate_strategies_conf "$_rs_manifest" "$_rs_conf" >/dev/null 2>&1 \
             || au_log "regen-strategies: strategies.conf не пересобрался из манифеста — плечи останутся прежними"
     fi
+    # ТО ЖЕ САМОЕ ДЛЯ QUIC, и по той же причине.
+    #
+    # quic_strategies.conf собирается из quic_strats.ini, а читает его
+    # create_default_strategy_files ниже — то есть без пересборки новый манифест
+    # QUIC материализовал бы СТАРЫЕ плечи, ровно как это было с TCP на r-84.1.
+    # До 14.09.2026 шаг QUIC не трогал вовсе: правка приезжала только полной
+    # переустановкой, а она случается далеко не каждый выпуск.
+    local _rs_quic_manifest="${ZAPRET2_DIR:-/opt/zapret2}/quic_strats.ini"
+    local _rs_quic_conf="${QUIC_STRATEGIES_CONF:-${CONFIG_DIR:-/opt/etc/zapret2}/quic_strategies.conf}"
+    if [ -s "$_rs_quic_manifest" ] && command -v generate_quic_strategies_conf >/dev/null 2>&1; then
+        generate_quic_strategies_conf "$_rs_quic_manifest" "$_rs_quic_conf" >/dev/null 2>&1 \
+            || au_log "regen-strategies: quic_strategies.conf не пересобрался — плечи QUIC останутся прежними"
+    fi
     create_default_strategy_files >/dev/null 2>&1
 }
 
@@ -2482,15 +2495,21 @@ au_run_check() {
     # сменой движка объявляется type=patch, но ставится полной переустановкой.
     # Человек, которому мы пишем «PATCH», а потом двадцать минут переустанавливаем
     # всё дерево, вправе считать, что мы его обманули.
+    # ТОЛЬКО когда обновление вообще есть. При «none» (версия не найдена в
+    # истории, либо всё актуально) переопределять нечего: иначе человеку
+    # обещается переустановка до пустой версии — «Доступно обновление
+    # (REINSTALL) до », — а на деле не будет ничего.
     local _chk_tag _chk_e
-    for _chk_tag in $(au_history_entries_after "$manifest" "$installed" \
-                      | sed -n 's/.*"v"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'); do
-        _chk_e=$(grep "^[[:space:]]*{\"v\": \"$_chk_tag\"" "$manifest" | head -1)
-        if [ -n "$(au_entry_bool "$_chk_e" full_install)" ]; then
-            action=reinstall
-            break
-        fi
-    done
+    if [ "$action" != "none" ]; then
+        for _chk_tag in $(au_history_entries_after "$manifest" "$installed" \
+                          | sed -n 's/.*"v"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'); do
+            _chk_e=$(grep "^[[:space:]]*{\"v\": \"$_chk_tag\"" "$manifest" | head -1)
+            if [ -n "$(au_entry_bool "$_chk_e" full_install)" ]; then
+                action=reinstall
+                break
+            fi
+        done
+    fi
 
     case "$action" in
         none)

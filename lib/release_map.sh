@@ -54,6 +54,12 @@ z2k_install_paths() {
         strats_new2.txt)
             echo "${zd}/strats_new2.txt"
             ;;
+        # Манифест QUIC-плеч. Его не было в карте вовсе: правка quic_strats.ini
+        # патчем на роутер не приезжала, и QUIC чинился только полной
+        # переустановкой — а она случается далеко не каждый выпуск.
+        quic_strats.ini)
+            echo "${zd}/quic_strats.ini"
+            ;;
         files/etc/*)
             echo "${zd}/etc/${repo_path#files/etc/}"
             ;;
@@ -179,7 +185,7 @@ z2k_install_paths() {
 # lighttpd ради них не за чем.
 z2k_steps_for() {
     case "$1" in
-        lib/strategies.sh|strats_new2.txt)
+        lib/strategies.sh|strats_new2.txt|quic_strats.ini)
             echo regen-strategies; echo regen-config; echo validate-config; echo restart-service ;;
         lib/config_official.sh)
             echo regen-config; echo validate-config; echo restart-service ;;
