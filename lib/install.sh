@@ -4494,18 +4494,18 @@ step_finalize() {
     if z2k_fetch "$local_z2k_url" "$local_z2k_script"; then
         chmod +x "$local_z2k_script" 2>/dev/null || true
         printf "  %-25s: %s\n" "z2k script" "$local_z2k_script"
-        # Expose a short `z2k` command in /opt/bin/ so users can just type
-        # `z2k menu`, `z2k diag` etc. without remembering the full path.
-        # Symlink (not copy) so re-installs that refresh z2k.sh are picked
-        # up automatically. /opt/bin/ is on PATH in Entware by default.
-        if [ -d /opt/bin ] && ln -sf "$local_z2k_script" /opt/bin/z2k 2>/dev/null; then
-            print_info "Команда 'z2k <args>' доступна из любого места (${local_z2k_script})"
-        else
-            print_info "Открыть меню позже: sh ${local_z2k_script} menu"
-        fi
     else
         print_warning "Не удалось сохранить z2k.sh в ${local_z2k_script}"
         print_info "Для повторного запуска используйте curl-команду из README"
+    fi
+    # Short `z2k` command in /opt/bin/ (on PATH in Entware). Symlink, not copy,
+    # so a refreshed z2k.sh is picked up automatically. Made WHENEVER z2k.sh is
+    # on disk — not only when this run's fetch succeeded: a failed fetch leaves
+    # the previous copy in place, and the command should work with it (#57).
+    if z2k_ensure_cli_link "$local_z2k_script"; then
+        print_info "Команда 'z2k <args>' доступна из любого места (${local_z2k_script})"
+    elif [ -f "$local_z2k_script" ]; then
+        print_info "Открыть меню позже: sh ${local_z2k_script} menu"
     fi
 
     # Webpanel re-install — opt-in component, восстанавливаем только если
