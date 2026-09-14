@@ -34,10 +34,10 @@ local function circular_instance(pool)
     for _,ins in ipairs(assert(all[pool],pool)) do if ins.func=='circular' then return ins end end
     error('missing circular: '..pool)
 end
-H.test('every shipped TCP pool uses retrans=2, quorum 3, and the reset opt-out',function()
+H.test('every shipped TCP pool uses retrans=3, quorum 3, and the reset opt-out',function()
     for _,key in ipairs({'rkn_tcp','yt_tcp','gv_tcp','http_rkn'}) do
         local c=circular_instance(key)
-        H.eq('2',c.arg.retrans); H.eq('3',c.arg.fails); H.eq(true,c.arg.reset)
+        H.eq('3',c.arg.retrans); H.eq('3',c.arg.fails); H.eq(true,c.arg.reset)
         H.eq('-s5556',c.range_in); H.eq('all',c.payload)
         for _,ins in ipairs(no_reset[key]) do if ins.func=='circular' then H.eq(nil,ins.arg.reset) end end
     end
