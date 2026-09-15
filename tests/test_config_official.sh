@@ -617,14 +617,12 @@ assert_eq "ручной Strategy.txt: retrans не задвоен" "1" "$_dups"
 # NFQWS2_TCP_PKT_IN — окно входящих в пакетах — 10: детектору успеха нужно
 # inseq=4096 + пакет, десять — двойной запас; прежние 50 кормили сторож обрыва.
 _root_pkt="${MOCK_DIR}/pkt-in"; rm -rf "$_root_pkt"; mkdir -p "$_root_pkt/lists"
-printf 'ENABLED=1\n' > "$_root_pkt/config"
+printf 'ENABLED=1\nZ2K_DISCORD_UPDATE_TLS_TIMEOUT=1\n' > "$_root_pkt/config"
 ( ZAPRET2_DIR="$_root_pkt" create_official_config "$_root_pkt/config" >/dev/null 2>&1 )
 assert_eq "NFQWS2_TCP_PKT_IN=10 в конфиге" 'NFQWS2_TCP_PKT_IN="10"' "$(grep -E '^NFQWS2_TCP_PKT_IN=' "$_root_pkt/config" | head -1)"
 assert_eq "Z2K_CIRCULAR_RESET переживает регенерацию (умолчание 1)" 'Z2K_CIRCULAR_RESET=1' "$(grep -E '^Z2K_CIRCULAR_RESET=' "$_root_pkt/config" | head -1)"
-assert_eq "Discord TLS recovery defaults to enabled" 'Z2K_DISCORD_UPDATE_TLS_TIMEOUT=1' "$(grep '^Z2K_DISCORD_UPDATE_TLS_TIMEOUT=' "$_root_pkt/config")"
-printf '\nZ2K_DISCORD_UPDATE_TLS_TIMEOUT=0\n' > "$_root_pkt/config"
-( ZAPRET2_DIR="$_root_pkt" create_official_config "$_root_pkt/config" >/dev/null 2>&1 )
-assert_eq "Discord TLS opt-out survives config regeneration" 'Z2K_DISCORD_UPDATE_TLS_TIMEOUT=0' "$(grep '^Z2K_DISCORD_UPDATE_TLS_TIMEOUT=' "$_root_pkt/config")"
+assert_eq "Discord TLS timer flag is removed from the previous release config" "" "$(grep '^Z2K_DISCORD_UPDATE_TLS_TIMEOUT=' "$_root_pkt/config")"
+assert_not_contains "generated config has no Discord TLS timeout arguments" "discord_tls_" "$(cat "$_root_pkt/config")"
 assert_eq "Z2K_USE_MID_STREAM_DETECTOR больше не пишется" "" "$(grep -E '^Z2K_USE_MID_STREAM_DETECTOR=' "$_root_pkt/config" | head -1)"
 # Ключи снятого 11.09.2026 детектора молчания в конфиг больше не пишутся.
 # Проверяем именно отсутствие: пока они писались, регенерация возвращала их со
