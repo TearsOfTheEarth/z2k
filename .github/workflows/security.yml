@@ -128,9 +128,15 @@ jobs:
       matrix:
         include:
           - language: go
-            # build-mode none: сканирует исходники без сборки — 4 независимых
-            # модуля в одном репо иначе требуют ручной оркестровки autobuild.
-            build-mode: none
+            # manual, а НЕ none. Здесь стояло none («сканировать без сборки»),
+            # но Go этот режим не поддерживает вовсе: init падал с «Go does not
+            # support the none build mode. Please try using one of the
+            # following build modes instead: autobuild, manual», и анализ Go не
+            # проходил ни разу с середины августа 2026 — красный крестик в
+            # еженедельном прогоне, а в Code scanning ни одной находки по Go.
+            # Модулей шесть в подкаталогах, поэтому собираем их сами тем же
+            # циклом, что у govulncheck, а не надеемся на autobuild.
+            build-mode: manual
           - language: actions
             build-mode: none
     steps:
@@ -151,6 +157,18 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+
+      - name: Build Go modules
+        if: matrix.language == 'go'
+        run: |
+          # Тот же список, что у govulncheck: все каталоги с go.mod
+          # (сторожит tests/test_module_matrix.sh).
+          rc=0
+          for m in mtproxy-client rt-proxy vps-relay z2k-detect z2k-verify z2k-warpd; do
+            echo "=== go build: $m ==="
+            (cd "$m" && go build ./...) || rc=1
+          done
+          exit $rc
 
       - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
