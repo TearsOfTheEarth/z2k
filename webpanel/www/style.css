@@ -197,9 +197,6 @@
   --bad-alpha-mid:   rgba(248, 81, 73, 0.10);
   --bad-alpha-strong: rgba(248, 81, 73, 0.4);
   --bad-alpha-reset: rgba(200, 80, 80, 0.08);
-  /* upd-entry border: darker shade of the type colour for the card frame */
-  --good-entry-border: rgba(63, 185, 80, 0.35);
-  --warn-entry-border: rgba(210, 153, 34, 0.35);
 
   /* Tester / sponsor card accents (credits page) */
   --tester-color: #f5b43c;
@@ -271,9 +268,6 @@
   --bad-alpha-mid:   rgba(207, 34, 46, 0.08);
   --bad-alpha-strong: rgba(207, 34, 46, 0.40);
   --bad-alpha-reset: rgba(207, 34, 46, 0.06);
-  /* upd-entry border for light theme */
-  --good-entry-border: rgba(26, 127, 55, 0.40);
-  --warn-entry-border: rgba(138, 91, 0, 0.35);
 
   --tester-color: #b87800;
   --tester-border: rgba(184, 120, 0, 0.45);
@@ -2015,42 +2009,66 @@ pre.log {
   color: var(--text);
   background: var(--bg-subtle);
 }
-.modal-footer-between {
-  justify-content: space-between !important;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-.modal-pagination {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.modal-page-info {
-  font-size: 13px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-.btn-sm {
-  padding: 5px 10px;
-  font-size: 13px;
-}
 .upd-history-list {
   flex: 1;
   min-height: 240px;
-  max-height: 55vh;
+  max-height: 65vh;
   overflow-y: auto;
   padding-right: 4px;
 }
-@media (max-width: 600px) {
-  .modal-footer-between {
-    flex-direction: column-reverse;
-    align-items: stretch;
-  }
-  .modal-pagination {
-    justify-content: space-between;
-    width: 100%;
-  }
+.upd-history-loading {
+  padding: 30px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.upd-history-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.upd-history-empty p {
+  margin: 0 0 16px;
+  line-height: 1.5;
+  font-size: 13px;
+}
+.upd-month-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 14px 0 6px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.upd-month-header:first-child {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 2px;
+}
+.upd-uninstalled {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  background: var(--warn-alpha-soft);
+}
+.upd-au-link,
+.upd-history-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dashed;
+  text-underline-offset: 3px;
+}
+.upd-au-link:hover,
+.upd-history-link:hover {
+  color: var(--text);
 }
 
 /* ---------- TOAST STACK ----------
@@ -2140,18 +2158,11 @@ pre.log {
 .upd-entry {
   display: flex;
   flex-direction: column;
-  padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--upd-entry-border, var(--border));
-  background: var(--upd-entry-bg, transparent);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
 }
-.upd-entry.upd-entry-patch {
-  --upd-entry-border: var(--good-entry-border);
-  --upd-entry-bg: var(--good-alpha-soft);
-}
-.upd-entry.upd-entry-reinstall {
-  --upd-entry-border: var(--warn-entry-border);
-  --upd-entry-bg: var(--warn-alpha-soft);
+.upd-entry:last-child {
+  border-bottom: 0;
 }
 .upd-details {
   margin-top: 4px;
@@ -2199,7 +2210,7 @@ pre.log {
 .upd-tag {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text);
 }
 .upd-type {
   display: inline-block;
@@ -2238,7 +2249,7 @@ pre.log {
 }
 .upd-desc {
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--text);
   white-space: pre-wrap;
   line-height: 1.45;
 }

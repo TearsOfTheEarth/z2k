@@ -60,7 +60,6 @@ export async function refreshUpdateBanner(opts = {}) {
   }
 
   if (!unknown && behind > 0) {
-    const pending = Array.isArray(d.pending) ? d.pending : [];
     banner.hidden = false;
     banner.className = "update-banner";
     banner.innerHTML = `
@@ -70,27 +69,12 @@ export async function refreshUpdateBanner(opts = {}) {
       </div>
       <div class="update-banner-actions">
         <button class="btn btn-primary" id="upd-apply">Обновить</button>
-        ${pending.length > 0 ? `<button class="btn btn-disclosure" id="upd-changelog-btn" aria-expanded="false"><span>Что нового</span>${_icons.chevronDown}</button>` : ""}
+        <button class="btn" id="upd-changelog-btn">Что нового</button>
         <button class="btn" id="upd-recheck">Проверить ещё раз</button>
       </div>
-      ${pending.length > 0 ? `
-        <div class="update-banner-body">
-          <div class="upd-changelog" id="upd-changelog" hidden>
-            ${pending.map(renderChangelogEntry).join("")}
-          </div>
-        </div>
-      ` : ""}
     `;
     const clBtn = document.getElementById("upd-changelog-btn");
-    const clBox = document.getElementById("upd-changelog");
-    if (clBtn && clBox) {
-      clBtn.addEventListener("click", () => {
-        const open = !clBox.hidden;
-        clBox.hidden = open;
-        clBtn.setAttribute("aria-expanded", open ? "false" : "true");
-        clBtn.classList.toggle("is-open", !open);
-      });
-    }
+    if (clBtn) clBtn.addEventListener("click", () => openHistoryModal(clBtn, { installed, behind }));
   } else if (unknown) {
     const why = err ? escapeHtml(err.message) : "список версий не скачался";
     const known = installed !== "?" ? `установлена ${escapeHtml(installed)} · ` : "";
@@ -99,7 +83,7 @@ export async function refreshUpdateBanner(opts = {}) {
     banner.innerHTML = `
       <div class="update-banner-text">
         <strong>Не удалось проверить обновления</strong>
-        <span class="update-banner-meta">${known}${why} · последняя удачная проверка ${ago}</span>
+        <span class="update-banner-meta">${known}${why} · последняя удачная проверка ${ago} · <button type="button" class="upd-history-link" id="upd-history-link">история версий</button></span>
       </div>
       <div class="update-banner-actions">
         <button class="btn" id="upd-recheck">Проверить ещё раз</button>
@@ -116,7 +100,7 @@ export async function refreshUpdateBanner(opts = {}) {
     banner.innerHTML = `
       <div class="update-banner-text">
         <strong>Обновления не проверяются</strong>
-        <span class="update-banner-meta">установлена ${escapeHtml(installed)} · список версий не удаётся скачать уже ${escapeHtml(staleFor)} · показано по устаревшим данным</span>
+        <span class="update-banner-meta">установлена ${escapeHtml(installed)} · список версий не удаётся скачать уже ${escapeHtml(staleFor)} · показано по устаревшим данным · <button type="button" class="upd-history-link" id="upd-history-link">история версий</button></span>
       </div>
       <div class="update-banner-actions">
         <button class="btn" id="upd-recheck">Проверить ещё раз</button>
@@ -128,17 +112,16 @@ export async function refreshUpdateBanner(opts = {}) {
     banner.innerHTML = `
       <div class="update-banner-text">
         <span>Установлена последняя версия (${escapeHtml(installed)})</span>
-        <span class="update-banner-meta">проверено ${ago}</span>
+        <span class="update-banner-meta">проверено ${ago} · <button type="button" class="upd-history-link" id="upd-history-link">история версий</button></span>
       </div>
       <div class="update-banner-actions">
-        <button class="btn" id="upd-history-btn">История изменений</button>
         <button class="btn" id="upd-recheck">Проверить</button>
       </div>
     `;
   }
 
-  const histBtn = document.getElementById("upd-history-btn");
-  if (histBtn) histBtn.addEventListener("click", () => openHistoryModal(histBtn));
+  const histLink = document.getElementById("upd-history-link");
+  if (histLink) histLink.addEventListener("click", () => openHistoryModal(histLink, { installed, behind }));
 
   const applyBtn = document.getElementById("upd-apply");
   if (applyBtn) applyBtn.addEventListener("click", () => applyUpdateFlow(available));
@@ -250,7 +233,20 @@ function summarizeDesc(desc) {
   return desc.slice(0, 160).replace(/\s+\S*$/, "") + "…";
 }
 
-function renderChangelogEntry(e) {
+function getMonthKey(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  try {
+    const s = d.toLocaleDateString("ru-RU", { month: "long", year: "numeric" });
+    const clean = s.replace(/\s*г\.?$/, "");
+    return clean.charAt(0).toUpperCase() + clean.slice(1);
+  } catch (_) {
+    return iso.slice(0, 7);
+  }
+}
+
+function renderChangelogEntry(e, isUninstalled) {
   const v = e && e.v ? String(e.v) : "?";
   const type = e && e.type ? String(e.type) : "patch";
   const ts = formatChangelogDate(e && e.ts);
@@ -261,12 +257,16 @@ function renderChangelogEntry(e) {
   const resetBadge = e && e.reset_state
     ? `<span class="upd-reset-state" title="Сбрасывает state.tsv после применения">сброс state</span>`
     : "";
+  const uninstalledBadge = isUninstalled
+    ? `<span class="upd-uninstalled" title="Версия ещё не установлена">не установлено</span>`
+    : "";
   return `
-    <div class="upd-entry upd-entry-${escapeHtml(typeCls === 'upd-type-reinstall' ? 'reinstall' : 'patch')}">
+    <div class="upd-entry">
       <div class="upd-entry-head">
         <span class="upd-tag">${escapeHtml(v)}</span>
         <span class="upd-type ${typeCls}">${escapeHtml(type)}</span>
         ${resetBadge}
+        ${uninstalledBadge}
         <span class="upd-date">${escapeHtml(ts)}</span>
       </div>
       <div class="upd-desc">${escapeHtml(summary)}</div>
@@ -280,57 +280,23 @@ function renderChangelogEntry(e) {
   `;
 }
 
-async function openHistoryModal(btn) {
-  const prevText = btn ? btn.textContent : "";
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Загрузка…";
-  }
-  let list = [];
-  try {
-    const res = await apiGet("/update/history");
-    if (res && Array.isArray(res.history)) {
-      list = res.history;
-    }
-  } catch (e) {
-    toastErr("Не удалось загрузить историю: ", e);
-    return;
-  } finally {
-    if (btn && btn.isConnected) {
-      btn.disabled = false;
-      btn.textContent = prevText;
-    }
-  }
+async function openHistoryModal(btn, ctx = {}) {
+  const installed = (ctx && ctx.installed) || "";
+  const behind = Number((ctx && ctx.behind) || 0);
 
-  if (!list.length) {
-    toastErr("История изменений пуста или недоступна");
-    return;
-  }
-
-  renderHistoryModal(list);
-}
-
-function renderHistoryModal(list) {
   const prevFocus = document.activeElement;
-  const pageSize = 10;
-  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
-  let currentPage = 1;
-
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
   backdrop.innerHTML = `
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hist-modal-title">
       <div class="modal-header">
-        <h3 id="hist-modal-title">История изменений</h3>
+        <h3 id="hist-modal-title">История версий</h3>
         <button class="modal-close" id="hist-modal-close" type="button" aria-label="Закрыть">${_icons.close}</button>
       </div>
-      <div class="upd-changelog upd-history-list" id="hist-modal-list"></div>
-      <div class="modal-footer modal-footer-between">
-        <div class="modal-pagination">
-          <button class="btn btn-sm" id="hist-prev" type="button">← Новее</button>
-          <span class="modal-page-info" id="hist-page-info"></span>
-          <button class="btn btn-sm" id="hist-next" type="button">Раньше →</button>
-        </div>
+      <div class="upd-history-list" id="hist-modal-list" tabindex="0">
+        <div class="upd-history-loading">Загрузка…</div>
+      </div>
+      <div class="modal-footer">
         <button class="btn" id="hist-close-btn" type="button">Закрыть</button>
       </div>
     </div>
@@ -339,25 +305,8 @@ function renderHistoryModal(list) {
   document.body.appendChild(backdrop);
 
   const listEl = backdrop.querySelector("#hist-modal-list");
-  const prevBtn = backdrop.querySelector("#hist-prev");
-  const nextBtn = backdrop.querySelector("#hist-next");
-  const pageInfo = backdrop.querySelector("#hist-page-info");
   const closeX = backdrop.querySelector("#hist-modal-close");
   const closeBtn = backdrop.querySelector("#hist-close-btn");
-
-  function renderPage(page) {
-    currentPage = page;
-    const start = (currentPage - 1) * pageSize;
-    const pageItems = list.slice(start, start + pageSize);
-    listEl.innerHTML = pageItems.map(renderChangelogEntry).join("");
-    listEl.scrollTop = 0;
-
-    pageInfo.textContent = `Страница ${currentPage} из ${totalPages}`;
-    prevBtn.disabled = currentPage <= 1;
-    nextBtn.disabled = currentPage >= totalPages;
-  }
-
-  renderPage(1);
 
   let closed = false;
   function closeModal() {
@@ -383,17 +332,96 @@ function renderHistoryModal(list) {
   });
   if (closeX) closeX.addEventListener("click", closeModal);
   if (closeBtn) closeBtn.addEventListener("click", closeModal);
-
-  if (prevBtn) {
-    prevBtn.addEventListener("click", () => {
-      if (currentPage > 1) renderPage(currentPage - 1);
-    });
-  }
-  if (nextBtn) {
-    nextBtn.addEventListener("click", () => {
-      if (currentPage < totalPages) renderPage(currentPage + 1);
-    });
-  }
-
   if (closeBtn) closeBtn.focus();
+
+  let inFlight = null;
+  let offset = 0;
+  const limit = 20;
+  let total = 0;
+  let lastMonthKey = "";
+  let foundInstalled = false;
+
+  function showEmptyState() {
+    listEl.innerHTML = `
+      <div class="upd-history-empty">
+        <p>Список версий ещё не скачан — роутер не смог сходить на GitHub. Нажмите «Проверить».</p>
+        <button class="btn" id="hist-recheck-btn" type="button">Проверить</button>
+      </div>
+    `;
+    const recheckBtn = listEl.querySelector("#hist-recheck-btn");
+    if (recheckBtn) {
+      recheckBtn.addEventListener("click", async () => {
+        recheckBtn.disabled = true;
+        recheckBtn.textContent = "Проверяем…";
+        try {
+          await refreshUpdateBanner({ force: true });
+        } catch (_) {}
+        offset = 0;
+        lastMonthKey = "";
+        foundInstalled = false;
+        listEl.innerHTML = '<div class="upd-history-loading">Загрузка…</div>';
+        await loadMore();
+      });
+    }
+  }
+
+  async function loadMore() {
+    if (inFlight) return inFlight;
+    inFlight = (async () => {
+      try {
+        const res = await apiGet(`/update/history?offset=${offset}&limit=${limit}`);
+        if (!res || !res.ok) throw new Error("bad response");
+        total = Number(res.total) || 0;
+        const items = Array.isArray(res.history) ? res.history : [];
+
+        if (offset === 0) {
+          listEl.innerHTML = "";
+        }
+
+        if (total === 0 || (!items.length && offset === 0)) {
+          showEmptyState();
+          return;
+        }
+
+        let chunkHtml = "";
+        for (const item of items) {
+          const monthKey = getMonthKey(item.ts);
+          if (monthKey && monthKey !== lastMonthKey) {
+            lastMonthKey = monthKey;
+            chunkHtml += `<div class="upd-month-header">${escapeHtml(monthKey)}</div>`;
+          }
+
+          const isUninstalled = !foundInstalled && behind > 0 && item.v !== installed;
+          if (item.v === installed) {
+            foundInstalled = true;
+          }
+
+          chunkHtml += renderChangelogEntry(item, isUninstalled);
+        }
+
+        if (offset === 0) {
+          listEl.innerHTML = chunkHtml;
+        } else {
+          listEl.innerHTML += chunkHtml;
+        }
+        offset += items.length;
+      } catch (_) {
+        if (offset === 0) {
+          showEmptyState();
+        }
+      } finally {
+        inFlight = null;
+      }
+    })();
+    return inFlight;
+  }
+
+  listEl.addEventListener("scroll", () => {
+    if (inFlight || offset >= total) return;
+    if (listEl.scrollTop + listEl.clientHeight >= listEl.scrollHeight - 80) {
+      loadMore();
+    }
+  });
+
+  await loadMore();
 }

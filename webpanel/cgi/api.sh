@@ -1033,7 +1033,7 @@ case "$method $path" in
         # UI-lock.
         done_flag=false
         case "$st" in
-            done|unknown) done_flag=true ;;
+            "done"|unknown) done_flag=true ;;
         esac
         # exit печатается ЧИСЛОМ, без кавычек: файл лежит в /tmp и переживает
         # обрывы записи, а нечисло сделало бы невалидным весь ответ.
@@ -1404,10 +1404,15 @@ case "$method $path" in
         ;;
 
     "GET /update/history")
+        offset=$(form_value "${QUERY_STRING:-}" "offset")
+        limit=$(form_value "${QUERY_STRING:-}" "limit")
+        case "$offset" in *[!0-9]*|"") offset=0 ;; esac
+        case "$limit" in *[!0-9]*|"") limit=20 ;; esac
+        [ "$limit" -gt 100 ] && limit=100
         update_refresh_manifest 0 2>/dev/null || true
-        history=$(update_history_entries)
         json_header
-        printf '{"ok":true,"history":%s}\n' "${history:-[]}"
+        update_history_entries "$offset" "$limit"
+        printf '\n'
         exit 0
         ;;
 

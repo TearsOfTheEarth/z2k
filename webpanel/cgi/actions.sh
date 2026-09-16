@@ -3009,27 +3009,45 @@ update_pending_entries() {
     ' "$AU_MANIFEST_CACHE"
 }
 
-# Extract all history entries in reverse order (newest first).
-# Output is a JSON array of raw entry objects.
+# Extract history entries in reverse chronological order (newest first).
+# Accepts offset and limit (defaults: 0, 20).
+# Outputs JSON: {"ok":true,"total":<n>,"history":[...]}
+#
+# Note: Assumes one JSON entry per line in the history array, as produced by
+# scripts/release.sh. Strips deliverable lists (changed_files, steps) to reduce payload.
 update_history_entries() {
+    local offset="${1:-0}"
+    local limit="${2:-20}"
     local src=""
-    for cand in "$AU_MANIFEST_CACHE" "$ZAPRET2_DIR/UPDATES.json" "/opt/zapret2/UPDATES.json" "UPDATES.json"; do
+    for cand in "$AU_MANIFEST_CACHE" "$ZAPRET2_DIR/UPDATES.json" "/opt/zapret2/UPDATES.json"; do
         if [ -s "$cand" ]; then src="$cand"; break; fi
     done
-    [ -n "$src" ] || { printf '[]'; return; }
-    awk '
-        /"v"[[:space:]]*:[[:space:]]*"/ {
+    [ -n "$src" ] || { printf '{"ok":true,"total":0,"history":[]}'; return; }
+    awk -v off="$offset" -v lim="$limit" '
+        /^[[:space:]]*\{[[:space:]]*"v"[[:space:]]*:/ {
             line = $0
             sub(/^[[:space:]]+/, "", line)
             sub(/[[:space:]]+$/, "", line)
             sub(/,$/, "", line)
+            gsub(/"changed_files"[[:space:]]*:[[:space:]]*\[[^]]*\][[:space:]]*,?[[:space:]]*/, "", line)
+            gsub(/"steps"[[:space:]]*:[[:space:]]*\[[^]]*\][[:space:]]*,?[[:space:]]*/, "", line)
+            gsub(/"ref"[[:space:]]*:[[:space:]]*"[^"]*"[[:space:]]*,?[[:space:]]*/, "", line)
+            gsub(/"full_install"[[:space:]]*:[[:space:]]*(true|false)[[:space:]]*,?[[:space:]]*/, "", line)
+            sub(/,[[:space:]]*\}/, "}", line)
             entries[++n] = line
         }
         END {
-            printf "["
-            for (i=n; i>=1; i--)
-                printf "%s%s", (i<n?",":""), entries[i]
-            printf "]"
+            printf "{\"ok\":true,\"total\":%d,\"history\":[", n
+            start = n - off
+            end = start - lim + 1
+            if (end < 1) end = 1
+            count = 0
+            for (i = start; i >= end; i--) {
+                if (i < 1 || i > n) continue
+                printf "%s%s", (count > 0 ? "," : ""), entries[i]
+                count++
+            }
+            printf "]}"
         }
     ' "$src"
 }
