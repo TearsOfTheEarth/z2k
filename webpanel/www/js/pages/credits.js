@@ -267,6 +267,17 @@ export function renderCredits() {
           обновления. Поддержка помогает делать это без перерывов.
         </p>
       </div>
+
+      <div class="card credits-card sponsor-card">
+        <div class="credits-badge sponsor-badge">${_icons.heart} Спонсор проекта</div>
+        <div class="credits-name">yozh</div>
+        <p class="desc">
+          Спасибо, yozh. Блокировки меняются быстрее, чем выходят релизы, и
+          догонять их приходится постоянно: проверять, что перестало работать,
+          искать, чем это обойти, и доводить найденное до роутеров. Поддержка
+          оплачивает именно эту гонку.
+        </p>
+      </div>
     </div>
   `;
 }

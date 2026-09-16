@@ -929,14 +929,14 @@ const SCENARIOS = {
             String(q("#au-hour-row").hidden));
       check("в списке 24 часа", sel.children.length === 24, "вариантов: " + sel.children.length);
       check("селектор показывает час из конфига", sel.value === "07", sel.value);
-      check("подпись описывает окно запуска", /07:00 и 08:30/.test(q("#au-hour-note").textContent),
+      check("подпись описывает окно запуска", /07:00 и 08:00/.test(q("#au-hour-note").textContent),
             q("#au-hour-note").textContent);
       sel.value = "05";
       sel.fire("change");
       await sleep(60);
       const body = (BODIES["/update/schedule"] || [])[0];
       check("выбранный час ушёл на роутер", body !== undefined && new URLSearchParams(body).get("hour") === "05", body);
-      check("подпись поехала за выбором", /05:00 и 06:30/.test(q("#au-hour-note").textContent),
+      check("подпись поехала за выбором", /05:00 и 06:00/.test(q("#au-hour-note").textContent),
             q("#au-hour-note").textContent);
     },
   },

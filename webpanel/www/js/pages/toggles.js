@@ -35,10 +35,10 @@ const TOGGLE_DEFS = [
       </div>` },
 ];
 
-// Разброс запуска: z2k-auto-update.sh сдвигает старт на 0..90 минут
-// (z2k_host_jitter 5400) — одинаково для конкретного роутера, но по флоту
+// Разброс запуска: z2k-auto-update.sh сдвигает старт на 0..60 минут
+// (z2k_host_jitter 3600) — одинаково для конкретного роутера, но по флоту
 // врассыпную, иначе тысяча роутеров придёт к GitHub в одну секунду.
-const AU_JITTER_MIN = 90;
+const AU_JITTER_MIN = 60;
 
 function auWindowText(hour) {
   const h = Number(hour);
@@ -58,8 +58,8 @@ function auHourSync(box) {
   row.hidden = !box.checked;
 }
 
-// Часы, а не часы с минутами: разброс в полтора часа делает минутную
-// точность обещанием, которого механизм не даёт.
+// Часы, а не часы с минутами: разброс в час делает минутную точность
+// обещанием, которого механизм не даёт.
 function wireAuHour(hour, box) {
   const sel = document.getElementById("au-hour");
   const note = document.getElementById("au-hour-note");

@@ -472,9 +472,9 @@ z2k_strategy_file_sane() {
 # В хеш идёт hostname ПЛЮС MAC: заводские имена у части моделей совпадают,
 # а MAC свой у каждого.
 z2k_host_jitter() {
-    local max="${1:-5400}" host hex j
-    case "$max" in ''|*[!0-9]*) max=5400 ;; esac
-    [ "$max" -gt 0 ] || max=5400
+    local max="${1:-3600}" host hex j
+    case "$max" in ''|*[!0-9]*) max=3600 ;; esac
+    [ "$max" -gt 0 ] || max=3600
     host=$(hostname 2>/dev/null)
     [ -n "$host" ] || host=$(cat /proc/sys/kernel/hostname 2>/dev/null)
     host="${host}$(cat /sys/class/net/*/address 2>/dev/null | head -1)"

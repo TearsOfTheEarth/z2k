@@ -2433,7 +2433,7 @@ Z2K_PANEL_AUTH=${saved_Z2K_PANEL_AUTH}
 Z2K_AUTO_UPDATE_ENABLED=${saved_Z2K_AUTO_UPDATE_ENABLED}
 Z2K_WARP_TRANSPORT=${saved_Z2K_WARP_TRANSPORT}
 # Час ночного автообновления, 00..23 по времени роутера. Реальный запуск
-# позже на 0..90 минут: разброс детерминированный по хосту, чтобы флот не
+# позже на 0..60 минут: разброс детерминированный по хосту, чтобы флот не
 # пришёл к GitHub в одну секунду (см. z2k_host_jitter в z2k-auto-update.sh).
 Z2K_AU_HOUR=${saved_Z2K_AU_HOUR}
 

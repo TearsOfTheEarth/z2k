@@ -3031,7 +3031,7 @@ update_apply_async() {
     # Z2K_AU_MANUAL=1 — a human pressed the button, so this apply runs even when
     # nightly auto-update is switched off.
     #
-    # Z2K_AU_NO_JITTER=1 — the updater sleeps a deterministic 0..90min per-host
+    # Z2K_AU_NO_JITTER=1 — the updater sleeps a deterministic 0..60min per-host
     # jitter to spread the fleet's nightly GitHub hits, and it decides "this is
     # the nightly run" from stdin not being a tty. This subshell closes stdin
     # (it has to — see the note above), so a button press was indistinguishable
