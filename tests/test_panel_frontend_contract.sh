@@ -166,7 +166,7 @@ function mkEl(key) {
     // Фокус отслеживается: «предупреждение открывается с фокусом на отказе»
     // и «после закрытия фокус вернулся» иначе не проверить ничем.
     focus() { global.document.activeElement = this; },
-    blur() {}, click() {}, insertAdjacentHTML() {}, scrollIntoView() {},
+    blur() {}, click() {}, insertAdjacentHTML(pos, h) { if (pos === "beforeend") this._h += String(h); }, scrollIntoView() {},
     fire(t, ev) { (this.listeners[t] || []).slice().forEach(f => f(ev || {})); },
   };
   return el;
@@ -486,6 +486,100 @@ const SCENARIOS = {
       check("кнопка повторной проверки на месте", b.innerHTML.indexOf("upd-recheck") >= 0, b.innerHTML.slice(0, 160));
       check("панель не выдаёт незнание за «последнюю версию»",
             b.innerHTML.indexOf("последняя версия") < 0, b.innerHTML.slice(0, 160));
+    },
+  },
+
+  // Клик по «история версий» открывает модалку с чейнджлогом; скролл догружает порцию; Escape закрывает её.
+  update_history_modal: {
+    hash: "#/dashboard",
+    setup() {
+      ROUTER = async (p, method, url) => {
+        if (p === "/update/status") return UPD_OK;
+        if (p === "/update/history") {
+          const u = new URL(url, "http://r");
+          const off = Number(u.searchParams.get("offset") || 0);
+          if (off === 0) {
+            return { ok: true, total: 3, history: [
+              { v: "p-84.22", type: "patch", ts: "2026-09-15T19:03:30Z", desc: "First test desc" },
+              { v: "p-84.21", type: "patch", ts: "2026-09-15T16:51:02Z", desc: "Second test desc" }
+            ]};
+          }
+          return { ok: true, total: 3, history: [
+            { v: "p-84.20", type: "patch", ts: "2026-09-14T12:00:00Z", desc: "Third test desc" }
+          ]};
+        }
+        return STATUS;
+      };
+    },
+    async run() {
+      await sleep(250);
+      const link = q("#upd-history-link");
+      check("ссылка на историю версий на месте", !!link, "link=" + link);
+      link.fire("click");
+      await sleep(150);
+      const bd = document.body.children.find(c => c.className === "modal-backdrop");
+      check("модалка открылась с заголовком «История версий»",
+            bd && bd.innerHTML.indexOf("История версий") >= 0,
+            "bd=" + (bd && bd.innerHTML.slice(0, 100)));
+      const list = q("#hist-modal-list");
+      check("записи истории отображены", list && list.innerHTML.indexOf("p-84.22") >= 0,
+            list && list.innerHTML.slice(0, 160));
+      // Скролл вниз догружает следующую порцию через insertAdjacentHTML
+      list.scrollTop = 800;
+      list.clientHeight = 200;
+      list.scrollHeight = 1000;
+      list.fire("scroll");
+      await sleep(150);
+      check("скролл догрузил следующую порцию", list && list.innerHTML.indexOf("p-84.20") >= 0,
+            list && list.innerHTML.slice(0, 240));
+      document.fire("keydown", { key: "Escape", preventDefault() {} });
+      await sleep(50);
+      const left = document.body.children.find(c => c.className === "modal-backdrop");
+      check("Escape закрыл модалку истории версий", !left, "backdrop висит");
+    },
+  },
+
+  // Пустая история версий (кэша нет) не молчит, а объясняет причину и даёт кнопку «Проверить».
+  update_history_empty: {
+    hash: "#/dashboard",
+    setup() {
+      ROUTER = async (p) => {
+        if (p === "/update/status") return UPD_OK;
+        if (p === "/update/history") return { ok: true, total: 0, history: [] };
+        return STATUS;
+      };
+    },
+    async run() {
+      await sleep(250);
+      const link = q("#upd-history-link");
+      link.fire("click");
+      await sleep(150);
+      const list = q("#hist-modal-list");
+      check("пустая история сообщает причину и предлагает проверить",
+            list && list.innerHTML.indexOf("не смог сходить на GitHub") >= 0 && list.innerHTML.indexOf("hist-recheck-btn") >= 0,
+            list && list.innerHTML);
+    },
+  },
+
+  // Ошибка загрузки истории версий не прячется за «не смог сходить на GitHub», а сообщает о сбое.
+  update_history_failed: {
+    hash: "#/dashboard",
+    setup() {
+      ROUTER = async (p) => {
+        if (p === "/update/status") return UPD_OK;
+        if (p === "/update/history") throw new Error("CGI 500 failure");
+        return STATUS;
+      };
+    },
+    async run() {
+      await sleep(250);
+      const link = q("#upd-history-link");
+      link.fire("click");
+      await sleep(150);
+      const list = q("#hist-modal-list");
+      check("ошибка истории показывает сообщение об ошибке",
+            list && list.innerHTML.indexOf("Не удалось загрузить историю версий") >= 0 && list.innerHTML.indexOf("CGI 500 failure") >= 0,
+            list && list.innerHTML);
     },
   },
 
@@ -1012,7 +1106,8 @@ run_scen() {
 
 # Счётчики внутри while-пайпа теряются (subshell), поэтому считаем по выводу.
 for scen in stale_apply poller_gone outage job_refused state_race state_resort_race \
-            update_check_failed toggles_status_failed toggles_left_page \
+            update_check_failed update_history_modal update_history_empty update_history_failed \
+            toggles_status_failed toggles_left_page \
             autohostlist_warn autohostlist_accept autohostlist_escape \
             autohostlist_dismiss autohostlist_off other_toggle_no_warn \
             warp_interrupt_toggle warp_interrupt_transport warp_foreign_job_blocks \
@@ -1049,6 +1144,10 @@ meta "отказ панели снова неотличим от обрыва с
 meta "кнопки туннеля снова живы при непрочитанном статусе" toggles_status_failed '/"#tg-enable"), true);/d; /"#tg-disable"), true);/d'
 meta "ответ после ухода со страницы снова роняет страницу" toggles_left_page '/if (!badge) return;/d'
 meta "упавшая проверка обновлений снова прячет весь блок" update_check_failed 's/^      err = e;$/      banner.hidden = true; return;/'
+meta "Escape перестал закрывать историю версий" update_history_modal 's/if (e\.key === "Escape") {/if (false) {/'
+meta "догрузка по скроллу не дописывает в список" update_history_modal 's/listEl\.insertAdjacentHTML/return; listEl.insertAdjacentHTML/'
+meta "пустая история снова молчит" update_history_empty 's/showEmptyState()/return/'
+meta "ошибка загрузки истории выдаётся за пустой кэш" update_history_failed 's/showErrorState(e)/showEmptyState()/'
 meta "предупреждение автохостлиста снято" autohostlist_warn 's/key === "autohostlist" && wanted === "1"/false/'
 meta "запрос уходит, не дожидаясь ответа юзера" autohostlist_accept 's/const go = await confirmModal/const go = true; confirmModal/'
 meta "Escape перестал быть отказом" autohostlist_escape 's/if (e.key === "Escape") { finish(false); return; }/return;/'
