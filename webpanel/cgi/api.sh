@@ -1403,6 +1403,14 @@ case "$method $path" in
         exit 0
         ;;
 
+    "GET /update/history")
+        update_refresh_manifest 0 2>/dev/null || true
+        history=$(update_history_entries)
+        json_header
+        printf '{"ok":true,"history":%s}\n' "${history:-[]}"
+        exit 0
+        ;;
+
     # ---------- УДАЛЕНИЕ ZAPRET2 ----------
     #
     # Слово подтверждения проверяет СЕРВЕР, а не только страница. Origin-guard

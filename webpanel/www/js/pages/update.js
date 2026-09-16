@@ -131,10 +131,14 @@ export async function refreshUpdateBanner(opts = {}) {
         <span class="update-banner-meta">проверено ${ago}</span>
       </div>
       <div class="update-banner-actions">
+        <button class="btn" id="upd-history-btn">История изменений</button>
         <button class="btn" id="upd-recheck">Проверить</button>
       </div>
     `;
   }
+
+  const histBtn = document.getElementById("upd-history-btn");
+  if (histBtn) histBtn.addEventListener("click", () => openHistoryModal(histBtn));
 
   const applyBtn = document.getElementById("upd-apply");
   if (applyBtn) applyBtn.addEventListener("click", () => applyUpdateFlow(available));
@@ -258,7 +262,7 @@ function renderChangelogEntry(e) {
     ? `<span class="upd-reset-state" title="Сбрасывает state.tsv после применения">сброс state</span>`
     : "";
   return `
-    <div class="upd-entry">
+    <div class="upd-entry upd-entry-${escapeHtml(typeCls === 'upd-type-reinstall' ? 'reinstall' : 'patch')}">
       <div class="upd-entry-head">
         <span class="upd-tag">${escapeHtml(v)}</span>
         <span class="upd-type ${typeCls}">${escapeHtml(type)}</span>
@@ -274,4 +278,122 @@ function renderChangelogEntry(e) {
       ` : ""}
     </div>
   `;
+}
+
+async function openHistoryModal(btn) {
+  const prevText = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Загрузка…";
+  }
+  let list = [];
+  try {
+    const res = await apiGet("/update/history");
+    if (res && Array.isArray(res.history)) {
+      list = res.history;
+    }
+  } catch (e) {
+    toastErr("Не удалось загрузить историю: ", e);
+    return;
+  } finally {
+    if (btn && btn.isConnected) {
+      btn.disabled = false;
+      btn.textContent = prevText;
+    }
+  }
+
+  if (!list.length) {
+    toastErr("История изменений пуста или недоступна");
+    return;
+  }
+
+  renderHistoryModal(list);
+}
+
+function renderHistoryModal(list) {
+  const prevFocus = document.activeElement;
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+  let currentPage = 1;
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop";
+  backdrop.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hist-modal-title">
+      <div class="modal-header">
+        <h3 id="hist-modal-title">История изменений</h3>
+        <button class="modal-close" id="hist-modal-close" type="button" aria-label="Закрыть">${_icons.close}</button>
+      </div>
+      <div class="upd-changelog upd-history-list" id="hist-modal-list"></div>
+      <div class="modal-footer modal-footer-between">
+        <div class="modal-pagination">
+          <button class="btn btn-sm" id="hist-prev" type="button">← Новее</button>
+          <span class="modal-page-info" id="hist-page-info"></span>
+          <button class="btn btn-sm" id="hist-next" type="button">Раньше →</button>
+        </div>
+        <button class="btn" id="hist-close-btn" type="button">Закрыть</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+
+  const listEl = backdrop.querySelector("#hist-modal-list");
+  const prevBtn = backdrop.querySelector("#hist-prev");
+  const nextBtn = backdrop.querySelector("#hist-next");
+  const pageInfo = backdrop.querySelector("#hist-page-info");
+  const closeX = backdrop.querySelector("#hist-modal-close");
+  const closeBtn = backdrop.querySelector("#hist-close-btn");
+
+  function renderPage(page) {
+    currentPage = page;
+    const start = (currentPage - 1) * pageSize;
+    const pageItems = list.slice(start, start + pageSize);
+    listEl.innerHTML = pageItems.map(renderChangelogEntry).join("");
+    listEl.scrollTop = 0;
+
+    pageInfo.textContent = `Страница ${currentPage} из ${totalPages}`;
+    prevBtn.disabled = currentPage <= 1;
+    nextBtn.disabled = currentPage >= totalPages;
+  }
+
+  renderPage(1);
+
+  let closed = false;
+  function closeModal() {
+    if (closed) return;
+    closed = true;
+    document.removeEventListener("keydown", onKey);
+    backdrop.remove();
+    if (prevFocus && typeof prevFocus.focus === "function") {
+      prevFocus.focus();
+    }
+  }
+
+  function onKey(e) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeModal();
+    }
+  }
+
+  document.addEventListener("keydown", onKey);
+  backdrop.addEventListener("click", e => {
+    if (e.target === backdrop) closeModal();
+  });
+  if (closeX) closeX.addEventListener("click", closeModal);
+  if (closeBtn) closeBtn.addEventListener("click", closeModal);
+
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => {
+      if (currentPage > 1) renderPage(currentPage - 1);
+    });
+  }
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => {
+      if (currentPage < totalPages) renderPage(currentPage + 1);
+    });
+  }
+
+  if (closeBtn) closeBtn.focus();
 }

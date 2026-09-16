@@ -197,6 +197,9 @@
   --bad-alpha-mid:   rgba(248, 81, 73, 0.10);
   --bad-alpha-strong: rgba(248, 81, 73, 0.4);
   --bad-alpha-reset: rgba(200, 80, 80, 0.08);
+  /* upd-entry border: darker shade of the type colour for the card frame */
+  --good-entry-border: rgba(63, 185, 80, 0.35);
+  --warn-entry-border: rgba(210, 153, 34, 0.35);
 
   /* Tester / sponsor card accents (credits page) */
   --tester-color: #f5b43c;
@@ -268,6 +271,9 @@
   --bad-alpha-mid:   rgba(207, 34, 46, 0.08);
   --bad-alpha-strong: rgba(207, 34, 46, 0.40);
   --bad-alpha-reset: rgba(207, 34, 46, 0.06);
+  /* upd-entry border for light theme */
+  --good-entry-border: rgba(26, 127, 55, 0.40);
+  --warn-entry-border: rgba(138, 91, 0, 0.35);
 
   --tester-color: #b87800;
   --tester-border: rgba(184, 120, 0, 0.45);
@@ -1984,6 +1990,68 @@ pre.log {
   justify-content: flex-end;
   gap: 8px;
 }
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.modal-header h3 {
+  margin: 0;
+}
+.modal-close {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.modal-close:hover {
+  color: var(--text);
+  background: var(--bg-subtle);
+}
+.modal-footer-between {
+  justify-content: space-between !important;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.modal-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.modal-page-info {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.upd-history-list {
+  flex: 1;
+  min-height: 240px;
+  max-height: 55vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+@media (max-width: 600px) {
+  .modal-footer-between {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .modal-pagination {
+    justify-content: space-between;
+    width: 100%;
+  }
+}
 
 /* ---------- TOAST STACK ----------
    Bottom-center column, новые toast'ы добавляются снизу, старые вытесняются
@@ -2069,7 +2137,22 @@ pre.log {
   max-height: 60vh;
   overflow-y: auto;
 }
-.upd-entry { display: flex; flex-direction: column; }
+.upd-entry {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--upd-entry-border, var(--border));
+  background: var(--upd-entry-bg, transparent);
+}
+.upd-entry.upd-entry-patch {
+  --upd-entry-border: var(--good-entry-border);
+  --upd-entry-bg: var(--good-alpha-soft);
+}
+.upd-entry.upd-entry-reinstall {
+  --upd-entry-border: var(--warn-entry-border);
+  --upd-entry-bg: var(--warn-alpha-soft);
+}
 .upd-details {
   margin-top: 4px;
   font-size: 12px;
@@ -2116,7 +2199,7 @@ pre.log {
 .upd-tag {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-muted);
 }
 .upd-type {
   display: inline-block;
@@ -2155,7 +2238,7 @@ pre.log {
 }
 .upd-desc {
   font-size: 13px;
-  color: var(--text);
+  color: var(--text-muted);
   white-space: pre-wrap;
   line-height: 1.45;
 }

@@ -3009,6 +3009,31 @@ update_pending_entries() {
     ' "$AU_MANIFEST_CACHE"
 }
 
+# Extract all history entries in reverse order (newest first).
+# Output is a JSON array of raw entry objects.
+update_history_entries() {
+    local src=""
+    for cand in "$AU_MANIFEST_CACHE" "$ZAPRET2_DIR/UPDATES.json" "/opt/zapret2/UPDATES.json" "UPDATES.json"; do
+        if [ -s "$cand" ]; then src="$cand"; break; fi
+    done
+    [ -n "$src" ] || { printf '[]'; return; }
+    awk '
+        /"v"[[:space:]]*:[[:space:]]*"/ {
+            line = $0
+            sub(/^[[:space:]]+/, "", line)
+            sub(/[[:space:]]+$/, "", line)
+            sub(/,$/, "", line)
+            entries[++n] = line
+        }
+        END {
+            printf "["
+            for (i=n; i>=1; i--)
+                printf "%s%s", (i<n?",":""), entries[i]
+            printf "]"
+        }
+    ' "$src"
+}
+
 # Launch auto-update apply asynchronously, return job_id for /job?id=...
 # polling. Output streams to /tmp/z2k-job-<id>.log so the UI can tail it via
 # the existing job_log path. The real auto-update log at /opt/var/log/...
