@@ -2037,12 +2037,8 @@ pre.log {
   font-weight: 600;
   color: var(--text-muted);
   padding: 14px 0 6px;
-  border-top: 1px solid var(--border);
-  margin-top: 8px;
 }
 .upd-month-header:first-child {
-  border-top: 0;
-  margin-top: 0;
   padding-top: 2px;
 }
 .upd-uninstalled {
@@ -2055,7 +2051,6 @@ pre.log {
   border: 1px solid var(--warn);
   background: var(--warn-alpha-soft);
 }
-.upd-au-link,
 .upd-history-link {
   background: transparent;
   border: 0;
@@ -2066,7 +2061,6 @@ pre.log {
   text-decoration: underline dashed;
   text-underline-offset: 3px;
 }
-.upd-au-link:hover,
 .upd-history-link:hover {
   color: var(--text);
 }

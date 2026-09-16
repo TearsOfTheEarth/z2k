@@ -1,4 +1,4 @@
-import { apiGet, apiPost, toastErr } from "../core/api.js";
+import { apiGet, apiPost, errHtml, toastErr } from "../core/api.js";
 import { _icons, escapeHtml, humanAgo } from "../core/dom.js";
 import { refreshStatus } from "../core/loadorder.js";
 import { openJobModal } from "../job.js";
@@ -74,7 +74,7 @@ export async function refreshUpdateBanner(opts = {}) {
       </div>
     `;
     const clBtn = document.getElementById("upd-changelog-btn");
-    if (clBtn) clBtn.addEventListener("click", () => openHistoryModal(clBtn, { installed, behind }));
+    if (clBtn) clBtn.addEventListener("click", () => openHistoryModal({ installed, behind }));
   } else if (unknown) {
     const why = err ? escapeHtml(err.message) : "список версий не скачался";
     const known = installed !== "?" ? `установлена ${escapeHtml(installed)} · ` : "";
@@ -121,7 +121,7 @@ export async function refreshUpdateBanner(opts = {}) {
   }
 
   const histLink = document.getElementById("upd-history-link");
-  if (histLink) histLink.addEventListener("click", () => openHistoryModal(histLink, { installed, behind }));
+  if (histLink) histLink.addEventListener("click", () => openHistoryModal({ installed, behind }));
 
   const applyBtn = document.getElementById("upd-apply");
   if (applyBtn) applyBtn.addEventListener("click", () => applyUpdateFlow(available));
@@ -280,7 +280,7 @@ function renderChangelogEntry(e, isUninstalled) {
   `;
 }
 
-async function openHistoryModal(btn, ctx = {}) {
+async function openHistoryModal(ctx = {}) {
   const installed = (ctx && ctx.installed) || "";
   const behind = Number((ctx && ctx.behind) || 0);
 
@@ -341,13 +341,7 @@ async function openHistoryModal(btn, ctx = {}) {
   let lastMonthKey = "";
   let foundInstalled = false;
 
-  function showEmptyState() {
-    listEl.innerHTML = `
-      <div class="upd-history-empty">
-        <p>Список версий ещё не скачан — роутер не смог сходить на GitHub. Нажмите «Проверить».</p>
-        <button class="btn" id="hist-recheck-btn" type="button">Проверить</button>
-      </div>
-    `;
+  function bindRetry() {
     const recheckBtn = listEl.querySelector("#hist-recheck-btn");
     if (recheckBtn) {
       recheckBtn.addEventListener("click", async () => {
@@ -363,6 +357,26 @@ async function openHistoryModal(btn, ctx = {}) {
         await loadMore();
       });
     }
+  }
+
+  function showEmptyState() {
+    listEl.innerHTML = `
+      <div class="upd-history-empty">
+        <p>Список версий ещё не скачан — роутер не смог сходить на GitHub. Нажмите «Проверить».</p>
+        <button class="btn" id="hist-recheck-btn" type="button">Проверить</button>
+      </div>
+    `;
+    bindRetry();
+  }
+
+  function showErrorState(err) {
+    listEl.innerHTML = `
+      <div class="upd-history-empty">
+        <p>Не удалось загрузить историю версий: ${errHtml(err)}</p>
+        <button class="btn" id="hist-recheck-btn" type="button">Проверить</button>
+      </div>
+    `;
+    bindRetry();
   }
 
   async function loadMore() {
@@ -402,12 +416,14 @@ async function openHistoryModal(btn, ctx = {}) {
         if (offset === 0) {
           listEl.innerHTML = chunkHtml;
         } else {
-          listEl.innerHTML += chunkHtml;
+          listEl.insertAdjacentHTML("beforeend", chunkHtml);
         }
         offset += items.length;
-      } catch (_) {
+      } catch (e) {
         if (offset === 0) {
-          showEmptyState();
+          showErrorState(e);
+        } else {
+          toastErr("Не удалось загрузить историю версий: ", e);
         }
       } finally {
         inFlight = null;

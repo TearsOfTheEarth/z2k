@@ -487,6 +487,18 @@ assert_eq "update/history: newest first (v=p-2)" "p-2" "$(jget "$OUT" 'd["histor
 assert_eq "update/history: changed_files вырезано" "null" "$(jget "$OUT" 'd["history"][0].get("changed_files")')"
 assert_eq "update/history: steps вырезано" "null" "$(jget "$OUT" 'd["history"][0].get("steps")')"
 
+# Пагинация: ?offset=1&limit=1 возвращает ровно одну вторую запись
+RAW=$(cgi GET /update/history "offset=1&limit=1")
+OUT=$(printf '%s\n' "$RAW" | cgi_body)
+assert_eq "update/history: offset=1&limit=1 длина 1" "1" "$(jget "$OUT" 'len(d["history"])')"
+assert_eq "update/history: offset=1&limit=1 вторая запись (v=p-1)" "p-1" "$(jget "$OUT" 'd["history"][0]["v"]')"
+
+# Клэмп: нечисловой offset -> 0, завышенный limit -> 100
+RAW=$(cgi GET /update/history "offset=abc&limit=99999")
+OUT=$(printf '%s\n' "$RAW" | cgi_body)
+assert_eq "update/history: clamp ok=true" "true" "$(jget "$OUT" 'd["ok"]')"
+assert_eq "update/history: clamp отдал все записи" "2" "$(jget "$OUT" 'len(d["history"])')"
+
 # Пустой манифест: total=0, history=[]
 rm -f "$AU_MANIFEST_CACHE"
 OUT=$(cgi GET /update/history "" | cgi_body)
