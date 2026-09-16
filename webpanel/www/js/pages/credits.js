@@ -286,6 +286,8 @@ const STRATEGY_POOL_NAMES = {
   rkn_tcp: "Заблокированные сайты (TCP)",
   yt_tcp:  "YouTube (TCP)",
   gv_tcp:  "YouTube видео (TCP)",
+  quic: "QUIC (все сайты)",
+  // Имя до 16.09.2026 — встречается в старых строках состояния и в сводке.
   yt_quic: "YouTube (QUIC/UDP)",
   discord_udp: "Дискорд, голос (UDP)",
 };

@@ -315,7 +315,7 @@ regenerate_config() {
 # User-owned, unlike shipped Strategy.txt (whose edits an update wipes by
 # design). Read by the generator on EVERY regeneration, so they survive toggles,
 # reinstalls and auto-updates.
-STRATEGY_POOLS="rkn_tcp yt_tcp gv_tcp yt_quic discord_udp"
+STRATEGY_POOLS="rkn_tcp yt_tcp gv_tcp quic discord_udp"
 CUSTOM_STRAT_DIR="${CUSTOM_STRAT_DIR:-$ZAPRET2_DIR/lists/custom-strategies}"
 
 strategy_pool_ok() {
@@ -330,7 +330,10 @@ _strategy_pool_source() {
         rkn_tcp) printf '%s\n' "$ZAPRET2_DIR/extra_strats/TCP/RKN/Strategy.txt" ;;
         yt_tcp)  printf '%s\n' "$ZAPRET2_DIR/extra_strats/TCP/YT/Strategy.txt" ;;
         gv_tcp)  printf '%s\n' "$ZAPRET2_DIR/extra_strats/TCP/YT_GV/Strategy.txt" ;;
-        yt_quic) printf '%s\n' "$ZAPRET2_DIR/extra_strats/UDP/YT/Strategy.txt" ;;
+        # Каталог файла остался ютубовским: путь виден людям в инструкциях и
+        # в их собственных заметках, а переносить файлы ради имени ключа —
+        # ломать то, что у человека уже работает.
+        quic|yt_quic) printf '%s\n' "$ZAPRET2_DIR/extra_strats/UDP/YT/Strategy.txt" ;;
         # У голосового пула шипованного файла НЕТ: его строка живёт прямо в
         # генераторе (lib/config_official.sh, discord_udp). Дублировать её сюда
         # нельзя — две копии длинной строки разъедутся на первом же изменении,

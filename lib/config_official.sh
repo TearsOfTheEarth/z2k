@@ -134,7 +134,7 @@ generate_nfqws2_opt_from_strategies() {
     # блок под custom-strategies вернул бы ровно то же зависание через чёрный ход.
     # Проверяем их все разом ДО первого использования — так отказ один и тот же
     # (fail-closed), а не «часть пулов подхватилась, часть нет».
-    for _cs_pool in yt_tcp gv_tcp rkn_tcp yt_quic discord_udp; do
+    for _cs_pool in yt_tcp gv_tcp rkn_tcp quic discord_udp; do
         _cs_check="${ZAPRET2_DIR:-/opt/zapret2}/lists/custom-strategies/${_cs_pool}.txt"
         [ -s "$_cs_check" ] || continue
         if ! _z2k_file_sane "$_cs_check"; then
@@ -160,10 +160,19 @@ generate_nfqws2_opt_from_strategies() {
     fi
     _cs=$(z2k_custom_strategy rkn_tcp) && [ -n "$_cs" ] && rkn_tcp="$_cs"
 
-    # YouTube QUIC autocircular fallback (13 strategies). Proven fake-blob escalation
+    # QUIC autocircular fallback (13 strategies). Proven fake-blob escalation
     # first; experimental z2k morphs demoted to the tail (slots 11-13). This inline is
     # only the cold-start default — extra_strats/UDP/YT/Strategy.txt (from quic_strats.ini)
-    # overrides it on any real install (see below). key=yt_quic stable key; nld=2 cuts CDN churn.
+    # overrides it on any real install (see below). key=quic stable key; nld=2 cuts CDN churn.
+    #
+    # ПУЛ ОБЩИЙ, А НЕ ЮТУБОВСКИЙ (16.09.2026). Раньше QUIC обходился только на
+    # доменах ютуба, и заблокированные сайты по HTTP/3 не обрабатывались НИ ОДНИМ
+    # профилем: браузер уходил в QUIC, получал тишину и откатывался на TCP — а
+    # приложения, которые так не умеют, просто не работали. Замер на роутере
+    # владельца: через минуты после включения ркн-списка в этот профиль в пуле
+    # появились facebook, instagram, cdninstagram, whatsapp — то есть трафик там
+    # был всегда, просто мимо нас. Ключ переименован yt_quic -> quic; старые
+    # строки состояния переносит init при первом старте нового кода.
     # udp_in=1, udp_out=5. Детектор — штатный (решение Марка 10.09.2026).
     #
     # udp_in=1 — как в документации nfqws2: успех при втором входящем пакете,
@@ -181,10 +190,17 @@ generate_nfqws2_opt_from_strategies() {
     # срабатываний. Значение измерено, поэтому держим его, а не умолчание.
     # Оба порога обязаны лежать ниже окна перехвата NFQWS2_UDP_PKT_IN/OUT —
     # см. комментарий там же. Same change mirrored in quic_strats.ini.
-    quic_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=5:key=yt_quic:nld=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=3:ip_autottl=-2,3-20:strategy=1 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=1 --lua-desync=drop:payload=quic_initial:dir=out:strategy=1 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=4:ip_autottl=-2,3-20:strategy=2 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=2 --lua-desync=drop:payload=quic_initial:dir=out:strategy=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_rutracker:repeats=6:strategy=3 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3:ipfrag_pos_udp=16:ipfrag_pos2=48:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=3 --lua-desync=drop:payload=quic_initial:dir=out:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-2,3-20:strategy=4 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=5 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=5 --lua-desync=drop:payload=quic_initial:dir=out:strategy=5 --lua-desync=udplen:payload=quic_initial:dir=out:increment=4:strategy=6 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=6 --lua-desync=udplen:payload=quic_initial:dir=out:increment=8:pattern=0xFEA82025:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=0x00000000000000000000000000000000:repeats=2:payload=all:strategy=8 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=8 --lua-desync=drop:payload=quic_initial:dir=out:strategy=8 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:ip_autottl=-2,3-20:strategy=9 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=24:strategy=9 --lua-desync=drop:payload=quic_initial:dir=out:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=10 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:noise=2:pad_min=12:pad_max=72:strategy=11 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:profile=2:noise=2:pad_min=8:pad_max=64:ipfrag_pos_udp=16:ipfrag_pos2=56:ipfrag_overlap12=16:ipfrag_overlap23=8:strategy=12 --lua-desync=z2k_timing_morph:payload=quic_initial:dir=out:packets=2:chance=85:fakes=2:pad_min=12:pad_max=72:strategy=13"
+    quic_udp="--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=5:key=quic:nld=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=3:ip_autottl=-2,3-20:strategy=1 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=1 --lua-desync=drop:payload=quic_initial:dir=out:strategy=1 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=4:ip_autottl=-2,3-20:strategy=2 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3_tiny:ipfrag_pos_udp=8:ipfrag_pos2=32:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=2 --lua-desync=drop:payload=quic_initial:dir=out:strategy=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic_rutracker:repeats=6:strategy=3 --lua-desync=send:payload=quic_initial:dir=out:ipfrag=z2k_ipfrag3:ipfrag_pos_udp=16:ipfrag_pos2=48:ipfrag_overlap12=8:ipfrag_overlap23=8:ipfrag_disorder:ipfrag_next2=255:strategy=3 --lua-desync=drop:payload=quic_initial:dir=out:strategy=3 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:ip_autottl=-2,3-20:strategy=4 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=6:payload=all:ip_autottl=-2,3-20:strategy=5 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=16:strategy=5 --lua-desync=drop:payload=quic_initial:dir=out:strategy=5 --lua-desync=udplen:payload=quic_initial:dir=out:increment=4:strategy=6 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=6 --lua-desync=udplen:payload=quic_initial:dir=out:increment=8:pattern=0xFEA82025:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=quic5:repeats=2:strategy=7 --lua-desync=fake:payload=quic_initial:dir=out:blob=0x00000000000000000000000000000000:repeats=2:payload=all:strategy=8 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=8:strategy=8 --lua-desync=drop:payload=quic_initial:dir=out:strategy=8 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:ip_autottl=-2,3-20:strategy=9 --lua-desync=send:payload=quic_initial:dir=out:ipfrag:ipfrag_pos_udp=24:strategy=9 --lua-desync=drop:payload=quic_initial:dir=out:strategy=9 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=10 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:noise=2:pad_min=12:pad_max=72:strategy=11 --lua-desync=z2k_quic_morph_v2:payload=quic_initial:dir=out:packets=2:profile=2:noise=2:pad_min=8:pad_max=64:ipfrag_pos_udp=16:ipfrag_pos2=56:ipfrag_overlap12=16:ipfrag_overlap23=8:strategy=12 --lua-desync=z2k_timing_morph:payload=quic_initial:dir=out:packets=2:chance=85:fakes=2:pad_min=12:pad_max=72:strategy=13"
 
     # If category strategy files exist, prefer them over hardcoded QUIC defaults.
-    _cs=$(z2k_custom_strategy yt_quic) && [ -n "$_cs" ] && quic_udp="$_cs"
+    # Имя файла сменилось вместе с ключом пула. Старый lists/custom-strategies/
+    # yt_quic.txt продолжаем читать: человек положил его руками, и молча
+    # перестать его применять — то же самое, что стереть его настройку.
+    # Форма «присваивание && проверка && присваивание» здесь обязательна: под
+    # `set -eu` (так генератор зовут тесты и установщик) отдельная строка
+    # `_cs=$(...) || _cs=$(...)` роняет весь запуск, когда своего файла нет
+    # НИ ПОД ОДНИМ именем — то есть у всех.
+    _cs=$(z2k_custom_strategy quic || z2k_custom_strategy yt_quic) && [ -n "$_cs" ] && quic_udp="$_cs"
     if [ -z "$_cs" ] && [ -f "${extra_strats_dir}/UDP/YT/Strategy.txt" ]; then
         quic_udp=$(z2k_read_pool_strategy "${extra_strats_dir}/UDP/YT/Strategy.txt") || return 1
     fi
@@ -544,7 +560,7 @@ generate_nfqws2_opt_from_strategies() {
         done
         set +f
     }
-    check_udp_thresholds yt_quic "$quic_udp"
+    check_udp_thresholds quic "$quic_udp"
     # Своя строка человека перекрывает наш набор — так же, как у остальных
     # пулов. Подставляем ДО проверки порогов: проверять надо то, что реально
     # уедет в движок, а не то, что мы предлагали по умолчанию.
@@ -1594,8 +1610,17 @@ generate_nfqws2_opt_from_strategies() {
         add_hostlist_line "${extra_strats_dir}/TCP/YT_GV/List.txt" "$wl_excl --hostlist=${extra_strats_dir}/TCP/YT_GV/List.txt $youtube_gv_tcp --new"
     fi
 
-    # QUIC YT
-    add_hostlist_line "${extra_strats_dir}/UDP/YT/List.txt" "$wl_excl --hostlist=${extra_strats_dir}/UDP/YT/List.txt $quic_udp --new"
+    # QUIC — общий профиль: ютуб плюс весь набор списков РКН.
+    #
+    # Набор ТОТ ЖЕ, что у TCP-профиля (rkn_lists_head + rkn_lists_tail): основной
+    # список, дополнительные домены, найденное детектором и автохостлист, если он
+    # включён. Discord-список сюда НЕ идёт — его UDP живёт на своих портах и
+    # разбирается профилем discord_udp.
+    #
+    # Порядок списков значения не имеет (движок объединяет), но ютубовский стоит
+    # первым намеренно: так видно, что профиль вырос из него, а не появился из
+    # ниоткуда.
+    add_hostlist_line "${extra_strats_dir}/UDP/YT/List.txt" "$wl_excl --hostlist=${extra_strats_dir}/UDP/YT/List.txt $rkn_lists_head$rkn_lists_tail $quic_udp --new"
 
     # Discord TCP: currently disabled for autocircular profile set.
     if [ -n "$discord_tcp_block" ]; then
@@ -2172,7 +2197,7 @@ NFQWS2_TCP_PKT_IN="${nfqws2_tcp_pkt_in}"
 # осторожная величина, а не смелая. TCP у нас давно 50/20.
 #
 # Инвариант, который обязан держаться: окно > порога детектора.
-#   yt_quic   udp_in=1 udp_out=5   -> нужно >=6, ставим 8
+#   quic      udp_in=1 udp_out=5   -> нужно >=6, ставим 8
 #   discord   udp_in=1 udp_out=4   -> нужно >=5, ставим 8
 NFQWS2_UDP_PKT_OUT="${Z2K_UDP_PKT_OUT}"
 NFQWS2_UDP_PKT_IN="${Z2K_UDP_PKT_IN}"

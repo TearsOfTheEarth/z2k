@@ -317,10 +317,10 @@ z2k_emergency_tcp_pool() {
 # требует ЧЕТЫРЁХ входящих пакетов на успех, а входящие серверные QUIC после
 # Initial уже не quic_initial — с узким фильтром детектор их просто не видит,
 # успех недостижим в принципе, и пул ротируется на здоровом трафике. Ключ
-# автостейта у него общий с боевым (yt_quic), так что ложные провалы уезжают
+# автостейта у него общий с боевым (quic), так что ложные провалы уезжают
 # ещё и в общее состояние. Форма фильтров обязана совпадать с боевой.
 z2k_emergency_quic_pool() {
-    printf '%s' "--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=5:key=yt_quic:nld=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:strategy=1 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:strategy=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=3"
+    printf '%s' "--filter-udp=443 --filter-l7=quic --in-range=a --out-range=a --payload=all --lua-desync=circular:fails=3:time=60:udp_in=1:udp_out=5:key=quic:nld=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=11:strategy=1 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=6:strategy=2 --lua-desync=fake:payload=quic_initial:dir=out:blob=fake_default_quic:repeats=3:strategy=3"
 }
 
 # --- запись ключа в config -------------------------------------------------
