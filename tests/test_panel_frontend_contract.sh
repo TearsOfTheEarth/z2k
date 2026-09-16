@@ -237,7 +237,8 @@ global.prompt = () => null;
 const STATUS = {
   ok: true, installed: "r-73", service: "active",
   toggles: { game_warp: "0", customd: "0",
-             dynamic_ttl: "1", stats: "1", ppe: "1", auto_update: "1", autohostlist: "0" },
+             dynamic_ttl: "1", stats: "1", ppe: "1", auto_update: "1", autohostlist: "0",
+             au_hour: "02" },
   tunnel: { running: false },
 };
 const UPD_OK = { ok: true, installed: "r-73", available: "r-73", behind: 0, last_check: 0, pending: [] };
@@ -908,6 +909,75 @@ const SCENARIOS = {
       check("человеку сказано подождать", TOASTS.some(t => /Дождитесь/.test(t)), TOASTS.join(" | "));
     },
   },
+
+  // Час ночного обновления (issue #60). Проверяется то, за что человек здесь
+  // платит вниманием: показан ли ТОТ час, что лежит в конфиге, уходит ли
+  // выбранный на роутер и совпадает ли подпись с выбором.
+  au_hour_pick: {
+    hash: "#/toggles",
+    setup() {
+      ROUTER = async (p) => {
+        if (p === "/update/schedule") return { ok: true };
+        if (p === "/policy/status") return { ok: true, name: "nfqws", exclude: "0", exists: false };
+        return { ...STATUS, toggles: { ...STATUS.toggles, au_hour: "07" } };
+      };
+    },
+    async run() {
+      await sleep(120);
+      const sel = q("#au-hour");
+      check("строка времени показана при включённом автообновлении", q("#au-hour-row").hidden === false,
+            String(q("#au-hour-row").hidden));
+      check("в списке 24 часа", sel.children.length === 24, "вариантов: " + sel.children.length);
+      check("селектор показывает час из конфига", sel.value === "07", sel.value);
+      check("подпись описывает окно запуска", /07:00 и 08:30/.test(q("#au-hour-note").textContent),
+            q("#au-hour-note").textContent);
+      sel.value = "05";
+      sel.fire("change");
+      await sleep(60);
+      const body = (BODIES["/update/schedule"] || [])[0];
+      check("выбранный час ушёл на роутер", body !== undefined && new URLSearchParams(body).get("hour") === "05", body);
+      check("подпись поехала за выбором", /05:00 и 06:30/.test(q("#au-hour-note").textContent),
+            q("#au-hour-note").textContent);
+    },
+  },
+
+  // Запись не прошла. Показанный час обязан вернуться к тому, что реально
+  // лежит в конфиге: иначе человек уходит уверенным, что выбрал время.
+  au_hour_save_failed: {
+    hash: "#/toggles",
+    setup() {
+      ROUTER = async (p) => {
+        if (p === "/update/schedule") return { ok: false, error: "save failed", __status: 500 };
+        if (p === "/policy/status") return { ok: true, name: "nfqws", exclude: "0", exists: false };
+        return STATUS;
+      };
+    },
+    async run() {
+      await sleep(120);
+      const sel = q("#au-hour");
+      sel.value = "05";
+      sel.fire("change");
+      await sleep(80);
+      check("показанный час вернулся к сохранённому", sel.value === "02", sel.value);
+      check("про отказ сказано", TOASTS.some(t => /Не удалось сохранить время/.test(t)), TOASTS.join(" | "));
+    },
+  },
+
+  // Автообновление выключено — выбирать время нечему.
+  au_hour_off: {
+    hash: "#/toggles",
+    setup() {
+      ROUTER = async (p) => {
+        if (p === "/policy/status") return { ok: true, name: "nfqws", exclude: "0", exists: false };
+        return { ...STATUS, toggles: { ...STATUS.toggles, auto_update: "0" } };
+      };
+    },
+    async run() {
+      await sleep(120);
+      check("строка времени скрыта", q("#au-hour-row").hidden === true, String(q("#au-hour-row").hidden));
+      check("ничего не сохранялось", !CALLS["/update/schedule"], "запросов: " + CALLS["/update/schedule"]);
+    },
+  },
 };
 
 (async () => {
@@ -945,7 +1015,8 @@ for scen in stale_apply poller_gone outage job_refused state_race state_resort_r
             update_check_failed toggles_status_failed toggles_left_page \
             autohostlist_warn autohostlist_accept autohostlist_escape \
             autohostlist_dismiss autohostlist_off other_toggle_no_warn \
-            warp_interrupt_toggle warp_interrupt_transport warp_foreign_job_blocks; do
+            warp_interrupt_toggle warp_interrupt_transport warp_foreign_job_blocks \
+            au_hour_pick au_hour_save_failed au_hour_off; do
     out=$(run_scen "$JS" "$scen")
     printf '%s\n' "$out"
     PASS=$((PASS + $(printf '%s\n' "$out" | grep -c '^\[PASS\]')))
@@ -998,6 +1069,10 @@ meta "итог перебитого действия снова трогает �
 meta "перечитанный статус снова перетирает нажатое" warp_interrupt_toggle 's/if (!warpActing()) box.checked = enabled;/box.checked = enabled;/'
 meta "WARP-действия снова идут модалкой" warp_interrupt_toggle 's/^\( *\)trackJob(title, jobId, {$/\1openJobModal(title, jobId, {/'
 meta "выбор транспорта снова заперт своим же действием" warp_interrupt_transport 's/if (foreignJobsActive("warp")) {/if (_warpJob) {/'
+# Час автообновления: мутант на каждую строку, ради которой сценарий написан.
+meta "селектор перестал показывать сохранённый час" au_hour_pick 's/^ *sel\.value = cur;$//'
+meta "провал записи оставляет невыбранный час" au_hour_save_failed 's/^ *sel\.value = prev;$//'
+meta "строка времени видна при выключенном автообновлении" au_hour_off 's/row.hidden = !box.checked;/row.hidden = false;/'
 meta "чужая задача больше не запирает выбор транспорта" warp_foreign_job_blocks 's/if (foreignJobsActive("warp")) {/if (false) {/'
 # Фокус на отказе: с фокусом на «Включать» Enter по привычке включает молча.
 meta "фокус уехал на кнопку согласия" autohostlist_warn 's/^      cancelBtn\.focus();$/      okBtn.focus();/'

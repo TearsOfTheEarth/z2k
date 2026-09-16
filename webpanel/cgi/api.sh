@@ -108,6 +108,19 @@ json_ok() {
     exit 0
 }
 
+# Расписание ночного обновления, хвостом к ответам /update/*. Баннер на
+# дашборде пишет им строку «автообновление в 02:00»: без этих полей ему
+# пришлось бы отдельно ходить в /status, то есть дважды опрашивать роутер
+# ради одной подписи, да ещё и в неизвестном порядке с основным опросом.
+au_schedule_json() {
+    local _en _h
+    _en=$(read_flag "Z2K_AUTO_UPDATE_ENABLED" "$CONFIG_FILE" "1")
+    _h=$(read_flag "Z2K_AU_HOUR" "$CONFIG_FILE" "02")
+    case "$_h" in [01][0-9]|2[0-3]) ;; *) _h=02 ;; esac
+    printf ',"au_enabled":'; json_string "${_en:-1}"
+    printf ',"au_hour":';    json_string "$_h"
+}
+
 json_fail() {
     # usage: json_fail <http-status-line> <msg>
     local status="$1" msg="$2"
@@ -255,6 +268,11 @@ case "$method $path" in
         stats_ack=$(read_flag "Z2K_STATS_ACK" "$CONFIG_FILE" "1")
         ppe=$(read_flag "Z2K_PPE_DEOFFLOAD" "$CONFIG_FILE" "1")
         auto_update=$(read_flag "Z2K_AUTO_UPDATE_ENABLED" "$CONFIG_FILE" "1")
+        # Час ночного обновления. Нормализуем здесь, а не в панели: конфиг
+        # правят и руками, а селектор без совпадающего варианта показал бы
+        # пустоту вместо времени, которое на самом деле сработает (02:00).
+        au_hour=$(read_flag "Z2K_AU_HOUR" "$CONFIG_FILE" "02")
+        case "$au_hour" in [01][0-9]|2[0-3]) ;; *) au_hour=02 ;; esac
         autohostlist=$(read_flag "Z2K_AUTOHOSTLIST" "$CONFIG_FILE" "0")
         tpid=$(tunnel_pid 2>/dev/null)
         tunnel_running=false
@@ -277,6 +295,7 @@ case "$method $path" in
         printf ',"stats_ack":';              json_string "${stats_ack:-1}"
         printf ',"ppe":';                    json_string "${ppe:-1}"
         printf ',"auto_update":';            json_string "${auto_update:-1}"
+        printf ',"au_hour":';                json_string "${au_hour:-02}"
         printf ',"autohostlist":';           json_string "${autohostlist:-0}"
         printf '},"tunnel":{"running":%s}}\n' "${tunnel_running:-false}"
         exit 0
@@ -1370,8 +1389,10 @@ case "$method $path" in
         json_string "$installed"
         printf ',"available":'
         json_string "$available"
-        printf ',"behind":%s,"last_check":%s,"fetch_failed":%s,"check_age":%s,"pending":%s}\n' \
+        printf ',"behind":%s,"last_check":%s,"fetch_failed":%s,"check_age":%s,"pending":%s' \
             "${behind:-0}" "${last_check:-0}" "${fetch_failed:-false}" "${check_age:--1}" "${pending:-[]}"
+        au_schedule_json
+        printf '}\n'
         exit 0
         ;;
 
@@ -1389,9 +1410,27 @@ case "$method $path" in
         json_string "$installed"
         printf ',"available":'
         json_string "$available"
-        printf ',"behind":%s,"last_check":%s,"fetch_failed":%s,"check_age":%s,"pending":%s}\n' \
+        printf ',"behind":%s,"last_check":%s,"fetch_failed":%s,"check_age":%s,"pending":%s' \
             "${behind:-0}" "${last_check:-0}" "${fetch_failed:-false}" "${check_age:--1}" "${pending:-[]}"
+        au_schedule_json
+        printf '}\n'
         exit 0
+        ;;
+
+    # Час ночного автообновления (issue #60). Запись одного ключа в конфиг —
+    # ни регенерации, ни рестарта службы: планировщик читает ключ на каждом
+    # ровном часе сам, поэтому синхронно и без job'а.
+    "POST /update/schedule")
+        require_method POST
+        body=$(read_body)
+        val=$(form_value "$body" "hour")
+        case "$val" in
+            [01][0-9]|2[0-3]) ;;
+            *) json_fail "400 Bad Request" "hour must be 00..23" ;;
+        esac
+        set_flag "Z2K_AU_HOUR" "$val" "$CONFIG_FILE" \
+            || json_fail "500 Internal Server Error" "save failed"
+        json_ok
         ;;
 
     "POST /update/apply")

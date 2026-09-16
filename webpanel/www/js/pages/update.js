@@ -21,6 +21,15 @@ export async function refreshUpdateBanner(opts = {}) {
   const behind = Number((d && d.behind) || 0);
   const ts = Number((d && d.last_check) || 0);
   const ago = ts > 0 ? humanAgo(ts) : "—";
+  // Подпись «когда оно само» — ответ на вопрос, который люди задают прямо
+  // здесь, глядя на баннер (issue #60). Только текст: крутят время там же,
+  // где и сам тумблер автообновления, а баннер целиком перерисовывается на
+  // каждом опросе — настройке внутри него не на чем держаться.
+  const auEnabled = !d || d.au_enabled !== "0";
+  const auHour = /^([01][0-9]|2[0-3])$/.test(String((d && d.au_hour) || "")) ? d.au_hour : "02";
+  const auNote = auEnabled
+    ? ` · <a class="upd-au-link" href="#/toggles">автообновление в ${auHour}:00</a>`
+    : ` · <a class="upd-au-link" href="#/toggles">автообновление выключено</a>`;
   // Манифест мог не скачаться (нет интернета, GH лежит) — тогда бекенд
   // отдаёт пустое available. Неизвестно ≠ «последняя версия»: утверждать
   // второе на основании отсутствия данных нельзя.
@@ -66,7 +75,7 @@ export async function refreshUpdateBanner(opts = {}) {
     banner.innerHTML = `
       <div class="update-banner-text">
         <strong>Доступно обновление: ${escapeHtml(available)}</strong>
-        <span class="update-banner-meta">установлена ${escapeHtml(installed)} · отстаёт на ${behind} · проверено ${ago}</span>
+        <span class="update-banner-meta">установлена ${escapeHtml(installed)} · отстаёт на ${behind} · проверено ${ago}${auNote}</span>
       </div>
       <div class="update-banner-actions">
         <button class="btn btn-primary" id="upd-apply">Обновить</button>
@@ -128,7 +137,7 @@ export async function refreshUpdateBanner(opts = {}) {
     banner.innerHTML = `
       <div class="update-banner-text">
         <span>Установлена последняя версия (${escapeHtml(installed)})</span>
-        <span class="update-banner-meta">проверено ${ago}</span>
+        <span class="update-banner-meta">проверено ${ago}${auNote}</span>
       </div>
       <div class="update-banner-actions">
         <button class="btn" id="upd-recheck">Проверить</button>

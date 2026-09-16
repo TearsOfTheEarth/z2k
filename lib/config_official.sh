@@ -1952,6 +1952,9 @@ create_official_config() {
     # Транспорт WARP, выбранный в панели. Та же механика пропажи, что выше:
     # без этой строки выбор сбрасывался бы в автомат любым тумблером.
     local saved_Z2K_WARP_TRANSPORT="auto"
+    # Час ночного автообновления (issue #60). Читается планировщиком
+    # (files/z2k-scheduler.sh), ставится в панели: «Режимы» → Автообновление.
+    local saved_Z2K_AU_HOUR="02"
     if [ -f "$config_file" ]; then
         saved_GAME_WARP_ENABLED=$(safe_config_read "GAME_WARP_ENABLED" "$config_file" "0")
         saved_TG_PROXY_USER_DISABLED=$(safe_config_read "TG_PROXY_USER_DISABLED" "$config_file" "0")
@@ -2016,6 +2019,11 @@ create_official_config() {
         saved_Z2K_WARP_TRANSPORT=$(safe_config_read "Z2K_WARP_TRANSPORT" "$config_file" "auto")
         # В heredoc значение уходит без кавычек — пропускаем только известное.
         case "$saved_Z2K_WARP_TRANSPORT" in wg|h2) ;; *) saved_Z2K_WARP_TRANSPORT=auto ;; esac
+        saved_Z2K_AU_HOUR=$(safe_config_read "Z2K_AU_HOUR" "$config_file" "02")
+        # Час — ровно две цифры 00..23. Мусор (правка руками, обрезанный
+        # конфиг) молча возвращает ночное умолчание: планировщик сравнивает
+        # строки, и «2» вместо «02» означало бы «никогда».
+        case "$saved_Z2K_AU_HOUR" in [01][0-9]|2[0-3]) ;; *) saved_Z2K_AU_HOUR=02 ;; esac
     fi
 
     # NFQWS2_TCP_PKT_IN — глубина наблюдения за ответом, см. z2k_reply_pkt_cap.
@@ -2424,6 +2432,10 @@ Z2K_PPE_DEOFFLOAD_QUIC=${saved_Z2K_PPE_DEOFFLOAD_QUIC}
 Z2K_PANEL_AUTH=${saved_Z2K_PANEL_AUTH}
 Z2K_AUTO_UPDATE_ENABLED=${saved_Z2K_AUTO_UPDATE_ENABLED}
 Z2K_WARP_TRANSPORT=${saved_Z2K_WARP_TRANSPORT}
+# Час ночного автообновления, 00..23 по времени роутера. Реальный запуск
+# позже на 0..90 минут: разброс детерминированный по хосту, чтобы флот не
+# пришёл к GitHub в одну секунду (см. z2k_host_jitter в z2k-auto-update.sh).
+Z2K_AU_HOUR=${saved_Z2K_AU_HOUR}
 
 # Persist the branch URL that this install was booted from, so that
 # z2k-update-lists.sh and other post-install tools (cron-driven) can
