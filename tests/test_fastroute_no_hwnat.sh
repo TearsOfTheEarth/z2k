@@ -83,23 +83,31 @@ rm -f "$TMP/nf/nf_conntrack_fastroute"; run "" 0 z2k_conntrack_tune_start
 [ ! -e "$TMP/nf/nf_conntrack_fastroute" ] && ok "нет файла fastroute: не создан" || no "файл создан" "absent" "present"
 
 # Панель: исполняем настоящий обработчик с подменными путями sysctl.
+. "$HERE/lib/utils.sh"
 . "$HERE/webpanel/cgi/actions.sh"
 Z2K_NF_SYSCTL="$TMP/nf"
 Z2K_HWNAT_DIR="$TMP/absent"
 CONFIG_FILE="$TMP/config"
 is_running() { [ "$panel_running" = 1 ]; }
-set_flag() { [ "$save_fails" = 1 ] && return 1; printf '%s=%s\n' "$1" "$2" > "$3"; }
-panel_running=1; save_fails=0
+# BSD sed требует пустой суффикс для -i; код записи конфига остаётся боевым.
+sed() {
+    if [ "$1" = -i ] && [ "$(uname)" = Darwin ]; then
+        shift; command sed -i '' "$@"
+    else
+        command sed "$@"
+    fi
+}
+panel_running=1
 mk_sysctl
 printf 'Z2K_FASTROUTE_OFF=0\n' > "$CONFIG_FILE"
 toggle_fastroute 1 > "$TMP/out" 2>&1
 [ "$?" = 0 ] && [ "$(val nf_conntrack_fastroute)" = 0 ] && grep -q '=1' "$CONFIG_FILE" && ok "панель выключает кэш и сохраняет флаг" || no "панель on" success failed
 toggle_fastroute 0 > "$TMP/out" 2>&1
 [ "$?" = 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && ok "панель возвращает кэш без рестарта" || no "панель off" 1 failed
-save_fails=1
+CONFIG_FILE="$TMP/missing-config"
 toggle_fastroute 1 > "$TMP/out" 2>&1
 [ "$?" != 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && ok "отказ записи конфига возвращает кэш" || no "rollback" 1 failed
-save_fails=0
+CONFIG_FILE="$TMP/config"
 rm "$TMP/nf/nf_conntrack_fastroute"
 toggle_fastroute 1 > "$TMP/out" 2>&1
 [ "$?" != 0 ] && grep -q '=0' "$CONFIG_FILE" && ok "нет sysctl: ошибка, флаг прежний" || no "missing sysctl" error success
