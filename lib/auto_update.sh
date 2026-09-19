@@ -971,7 +971,6 @@ au_step_refresh_binaries() {
 au_service_for_binary() {
     case "$1" in
         z2k-rt-proxy)      echo "/opt/etc/init.d/S96z2k-rt-proxy" ;;
-        z2k-detect)        echo "/opt/etc/init.d/S98z2k-detect" ;;
         z2k-warpd)         echo "/opt/etc/init.d/S51z2k-warp" ;;
         tg-mtproxy-client) echo "/opt/etc/init.d/S98tg-tunnel /opt/etc/init.d/S97z2k-http-tunnel" ;;
     esac
@@ -1841,7 +1840,6 @@ EOF
             files/init.d/S51z2k-warp)          restart_set="$restart_set S51z2k-warp" ;;
             files/init.d/S99z2k-scheduler)     restart_set="$restart_set S99z2k-scheduler" ;;
             files/z2k-scheduler.sh)            restart_set="$restart_set S99z2k-scheduler" ;;
-            files/init.d/S98z2k-detect)        restart_set="$restart_set S98z2k-detect" ;;
             webpanel/*)                        restart_set="$restart_set S96z2k-webpanel" ;;
             files/z2k-geosite.sh)
                 # Новая логика geosite — нужен immediate refresh, иначе она
@@ -2076,16 +2074,14 @@ au_health_check() {
 # au_snapshot_services — какие сервисы z2k работали ДО обновления.
 #
 # ЗАЧЕМ. Health-check раньше ругался на любой неработающий сервис из списка. Но
-# половина из них выключается флагом: Z2K_DISCOVER по умолчанию OFF, поэтому
-# «ВНИМАНИЕ, после обновления не работают: S98z2k-detect» получал весь флот при
-# КАЖДОМ обновлении — на здоровом роутере, где сервис и не должен работать.
-# Такую строку перестают читать, а вместе с ней перестают замечать настоящую.
+# некоторые сервисы пользователь выключает намеренно. Предупреждение о таком
+# сервисе скрывало настоящие регрессии обновления.
 #
 # Ругаться надо не на «выключен», а на «работал и перестал»: это ровно то, что
 # может сломать обновление, и это не зависит ни от одного флага фич. Ту же
 # логику мы уже применяем к nfqws2 (Z2K_AU_NFQWS_WAS_ALIVE).
 au_services_list() {
-    printf '%s\n' S98tg-tunnel S96z2k-rt-proxy S99z2k-scheduler S98z2k-detect S96z2k-webpanel
+    printf '%s\n' S98tg-tunnel S96z2k-rt-proxy S99z2k-scheduler S96z2k-webpanel
 }
 
 au_service_pattern() {
@@ -2093,7 +2089,6 @@ au_service_pattern() {
         S98tg-tunnel)      printf 'tg-mtproxy-client' ;;
         S96z2k-rt-proxy)   printf 'rt-proxy' ;;
         S99z2k-scheduler)  printf 'z2k-scheduler' ;;
-        S98z2k-detect)     printf 'z2k-detect' ;;
         S96z2k-webpanel)   printf 'lighttpd' ;;
         *)                 return 1 ;;
     esac

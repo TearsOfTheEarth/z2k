@@ -1424,7 +1424,7 @@ download_init_script() {
     # z2k-dynamic-strategy.lua removed in r-15 Phase 1 (slot in
     # rkn_tcp removed alongside, see lib/config_official.sh).
     # The handler depended on the dead z2k-classify producer; new
-    # discovery feedback in Phase 3 lives in discovered-domains.txt.
+    # Experimental background discovery has also been retired.
 
     # Snapshot domain lists used by local install flow (no external list repos)
     local list_file

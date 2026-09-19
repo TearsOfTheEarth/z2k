@@ -1554,7 +1554,6 @@ YouTube (видео)|${ZAPRET2_DIR}/extra_strats/TCP/YT_GV/List.txt
 YouTube (QUIC)|${ZAPRET2_DIR}/extra_strats/UDP/YT/List.txt
 Discord|${ZAPRET2_DIR}/extra_strats/TCP_Discord.txt
 автохостлист|${LISTS_DIR}/autohostlist-domains.txt
-найденные автоматически|${LISTS_DIR}/discovered-domains.txt
 CATALOG
 }
 
@@ -3254,8 +3253,8 @@ update_apply_async() {
 # ЧТО ЭТО. z2k-detect probe делает одну пробу домена мимо нашего обхода
 # (raw-сокет с SO_MARK) и печатает, чем именно кончилась каждая стадия —
 # DNS, TCP, TLS, HTTP, — плюс вердикт: блокирует ли DPI и есть ли домен в
-# наших списках. Команда СТАТЕЛЕСС: не открывает состояние демона, ничего не
-# пишет в списки и в discovered-domains.txt. Поэтому её безопасно дёргать из
+# наших списках. Команда не сохраняет состояние и ничего не пишет в списки.
+# Поэтому её безопасно дёргать из
 # панели по кнопке.
 #
 # ПОЧЕМУ СИНХРОННО, БЕЗ МАШИНЕРИИ ЗАДАЧ. У пробы свой внутренний потолок в

@@ -1,32 +1,5 @@
 #!/bin/sh
-# tests/test_found_domains_survive_reinstall.sh — домены, найденные автоматикой,
-# переживают переустановку.
-#
-# ЗАЧЕМ ОНА ПОЯВИЛАСЬ. Обновление у нас — это переустановка: дерево /opt/zapret2
-# уносится в .old.$$ и удаляется, а обратно кладётся то, что установщик явно
-# положил в бэкап. В этом списке были whitelist, extra-domains, адресные
-# исключения, списки WARP и пользовательские стратегии — всё, что ввёл ЧЕЛОВЕК.
-# А то, что нашла АВТОМАТИКА, в списке отсутствовало:
-#
-#   lists/autohostlist-domains.txt  — след автохостлиста движка,
-#   lists/discovered-domains.txt    — публикации демона z2k-detect.
-#
-# Первый не бэкапился вовсе, второй установщик к тому же пересоздавал ПУСТЫМ.
-# То есть недели наблюдений стирались на каждой обнове, и незаметно: панель
-# показывала те же две категории, просто пустые — «пока ничего не нашлось».
-# Восстановить их нечем, они не выводятся ни из shipped-файлов, ни из апстрима.
-#
-# ЧТО ОХРАНЯЕТСЯ:
-#
-#   1. Оба файла реально доезжают: бэкап и восстановление ИСПОЛНЯЮТСЯ на
-#      временном дереве, а не проверяются грепом по комментариям.
-#   2. Пустышка, которую установщик создаёт для discovered-domains.txt, не
-#      затирает восстановленное — порядок в коде правильный.
-#   3. Бэкап fail-closed: если копия не удалась, установка прерывается ДО
-#      удаления рабочего дерева (как у whitelist), а не продолжается молча.
-#   4. Спасение из недостроенной прошлой установки (.old) знает про оба файла.
-#
-# POSIX sh. Настоящая установка не запускается.
+# Preserve the independent opt-in nfqws2 autohostlist; retire experimental discovery.
 
 PASS=0; FAIL=0
 ok() { PASS=$((PASS+1)); printf '[PASS] %s\n' "$1"; }
@@ -40,7 +13,7 @@ INST="$ROOT/lib/install.sh"
 TMP=$(mktemp -d) || exit 1
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT INT TERM
 
-MARK='for _acc in autohostlist-domains discovered-domains; do'
+MARK='for _acc in autohostlist-domains; do'
 
 # Вынимаем НАСТОЯЩИЕ куски установщика: первый цикл — бэкап, второй — возврат.
 extract() {
@@ -86,18 +59,16 @@ mkdir -p "$BK"
 ) > "$TMP/backup.log" 2>&1
 _rc=$?
 
-if [ "$_rc" = "0" ] && [ -f "$BK/autohostlist-domains.txt" ] && [ -f "$BK/discovered-domains.txt" ]; then
-    ok "оба файла уходят в бэкап"
+if [ "$_rc" = "0" ] && [ -f "$BK/autohostlist-domains.txt" ] && [ ! -e "$BK/discovered-domains.txt" ]; then
+    ok "автохостлист сохраняется, retired discovery не сохраняется"
 else
-    no "оба файла в бэкапе" "две копии, rc=0" "rc=$_rc $(ls "$BK" 2>/dev/null | tr '\n' ' ')"
+    no "состав бэкапа" "только autohostlist, rc=0" "rc=$_rc $(ls "$BK" 2>/dev/null | tr '\n' ' ')"
 fi
 
-# Переустановка: дерева больше нет. Установщик пересоздаёт пустой
-# discovered-domains.txt (lib/install.sh, «z2k-detect daemon-managed hostlist»),
-# и именно эта пустышка раньше и оставалась у человека.
+# Even a stale backup must not resurrect the retired list.
+printf 'example.blocked\n' > "$BK/discovered-domains.txt"
 rm -rf "$TREE"
 mkdir -p "$TREE/lists"
-: > "$TREE/lists/discovered-domains.txt"
 
 (
     . "$TMP/stubs.sh"
@@ -115,19 +86,10 @@ else
     no "autohostlist-domains.txt вернулся" "meduza.io+rutracker.org" "[$_got_auto] rc=$_rc"
 fi
 
-if [ "$_got_disc" = "example.blocked" ]; then
-    ok "discovered-domains.txt вернулся, пустышка его не затёрла"
+if [ ! -e "$TREE/lists/discovered-domains.txt" ]; then
+    ok "discovery не возвращается из старого бэкапа"
 else
-    no "discovered-domains.txt вернулся" "example.blocked" "[$_got_disc] rc=$_rc"
-fi
-
-# --- 2. Порядок в коде: возврат ПОСЛЕ создания пустышки ----------------------
-_ln_empty=$(grep -n ': > "${ZAPRET2_DIR}/lists/discovered-domains.txt"' "$INST" | head -1 | cut -d: -f1)
-_ln_restore=$(grep -n "$MARK" "$INST" | sed -n '2p' | cut -d: -f1)
-if [ -n "$_ln_empty" ] && [ -n "$_ln_restore" ] && [ "$_ln_restore" -gt "$_ln_empty" ]; then
-    ok "возврат идёт после создания пустышки ($_ln_empty → $_ln_restore)"
-else
-    no "порядок пустышка→возврат" "возврат позже" "пустышка=$_ln_empty возврат=$_ln_restore"
+    no "discovery не возвращается" "absent" "$_got_disc"
 fi
 
 # --- 3. Бэкап fail-closed ----------------------------------------------------
@@ -160,14 +122,62 @@ chmod 700 "$BK2" 2>/dev/null
 # --- 4. Спасение из недостроенной установки знает про оба файла --------------
 _rescue=$(awk '/Прошлая установка не завершилась/{c=1} c{print} c&&/^            done$/{exit}' "$INST")
 _miss=""
-for f in lists/autohostlist-domains.txt lists/discovered-domains.txt; do
+# shellcheck disable=SC2043
+for f in lists/autohostlist-domains.txt; do
     printf '%s' "$_rescue" | grep -q "$f" || _miss="$_miss $f"
 done
 if [ -z "$_miss" ]; then
-    ok "спасение из .old переносит оба файла"
+    ok "спасение из .old переносит автохостлист"
 else
     no "спасение из .old" "оба файла в списке" "нет:$_miss"
 fi
+
+# Execute the real migration, including a running legacy writer and a manual probe.
+. "$ROOT/lib/config_official.sh"
+ZAPRET2_DIR="$TREE"
+Z2K_DISCOVERY_PROC_ROOT="$TMP/proc"
+mkdir -p "$TMP/opt/etc/init.d" "$Z2K_DISCOVERY_PROC_ROOT/321" "$Z2K_DISCOVERY_PROC_ROOT/322"
+printf '%s\000run\000' "$TMP/opt/sbin/z2k-detect" > "$Z2K_DISCOVERY_PROC_ROOT/321/cmdline"
+printf '%s\000probe\000www.google.com\000' "$TMP/opt/sbin/z2k-detect" > "$Z2K_DISCOVERY_PROC_ROOT/322/cmdline"
+printf 'www.google.com\n' > "$TREE/lists/discovered-domains.txt"
+printf 'www.google.com\n' > "$TREE/lists/extra-domains.txt"
+printf 'google.com\n' > "$TREE/lists/whitelist.txt"
+touch "$TMP/opt/etc/init.d/S98z2k-detect" "$TREE/z2k-detect-watchdog.sh"
+# Only the process-control boundary is mocked; migration logic is production code.
+kill() { echo "$1" >> "$TMP/killed"; rm -rf "${Z2K_DISCOVERY_PROC_ROOT:?}/${1:?}"; }
+z2k_retire_discovery
+_rc=$?
+if [ "$_rc" = 0 ] && [ ! -e "$TREE/lists/discovered-domains.txt" ] &&
+   [ ! -e "$TMP/opt/etc/init.d/S98z2k-detect" ] && [ ! -e "$TREE/z2k-detect-watchdog.sh" ]; then
+    ok "миграция удаляет публикацию и оба пути автозапуска"
+else
+    no "миграция" "deleted, rc=0" "rc=$_rc"
+fi
+if [ "$(cat "$TMP/killed")" = 321 ] && [ -f "$Z2K_DISCOVERY_PROC_ROOT/322/cmdline" ]; then
+    ok "остановлен только run, ручная проба не тронута"
+else
+    no "выбор процесса" "321 only" "$(cat "$TMP/killed")"
+fi
+if [ "$(cat "$TREE/lists/extra-domains.txt")" = www.google.com ] &&
+   [ "$(cat "$TREE/lists/whitelist.txt")" = google.com ] &&
+   [ -s "$TREE/lists/autohostlist-domains.txt" ]; then
+    ok "ручные списки и отдельный автохостлист сохранены"
+else
+    no "чужие списки" "preserved" "changed"
+fi
+z2k_retire_discovery && ok "повторная миграция идемпотентна" || no "повтор" 0 "$?"
+
+# A still-running writer must veto deleting its publication.
+mkdir -p "$Z2K_DISCOVERY_PROC_ROOT/321"
+printf '%s\000run\000' "$TMP/opt/sbin/z2k-detect" > "$Z2K_DISCOVERY_PROC_ROOT/321/cmdline"
+printf 'www.google.com\n' > "$TREE/lists/discovered-domains.txt"
+kill() { return 1; }
+if z2k_retire_discovery; then
+    no "отказ остановки виден вызывающему" "nonzero" 0
+else
+    ok "отказ остановки виден вызывающему"
+fi
+[ -s "$TREE/lists/discovered-domains.txt" ] && ok "при живом writer публикация не удаляется" || no "writer" "preserved" "deleted"
 
 printf '\nPASSED: %d\nFAILED: %d\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
