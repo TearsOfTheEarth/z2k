@@ -82,5 +82,43 @@ rm -f "$TMP/nf/nf_conntrack_fastroute"; run "" 0 z2k_conntrack_tune_start
 [ $? -eq 0 ] && ok "нет файла fastroute: старт возвращает 0" || no "нет файла" 0 "$?"
 [ ! -e "$TMP/nf/nf_conntrack_fastroute" ] && ok "нет файла fastroute: не создан" || no "файл создан" "absent" "present"
 
+# Панель: исполняем настоящий обработчик с подменными путями sysctl.
+. "$HERE/webpanel/cgi/actions.sh"
+Z2K_NF_SYSCTL="$TMP/nf"
+Z2K_HWNAT_DIR="$TMP/absent"
+CONFIG_FILE="$TMP/config"
+is_running() { [ "$panel_running" = 1 ]; }
+set_flag() { [ "$save_fails" = 1 ] && return 1; printf '%s=%s\n' "$1" "$2" > "$3"; }
+panel_running=1; save_fails=0
+mk_sysctl
+printf 'Z2K_FASTROUTE_OFF=0\n' > "$CONFIG_FILE"
+toggle_fastroute 1 > "$TMP/out" 2>&1
+[ "$?" = 0 ] && [ "$(val nf_conntrack_fastroute)" = 0 ] && grep -q '=1' "$CONFIG_FILE" && ok "панель выключает кэш и сохраняет флаг" || no "панель on" success failed
+toggle_fastroute 0 > "$TMP/out" 2>&1
+[ "$?" = 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && ok "панель возвращает кэш без рестарта" || no "панель off" 1 failed
+save_fails=1
+toggle_fastroute 1 > "$TMP/out" 2>&1
+[ "$?" != 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && ok "отказ записи конфига возвращает кэш" || no "rollback" 1 failed
+save_fails=0
+rm "$TMP/nf/nf_conntrack_fastroute"
+toggle_fastroute 1 > "$TMP/out" 2>&1
+[ "$?" != 0 ] && grep -q '=0' "$CONFIG_FILE" && ok "нет sysctl: ошибка, флаг прежний" || no "missing sysctl" error success
+mk_sysctl
+panel_running=0
+toggle_fastroute 1 > "$TMP/out" 2>&1
+[ "$?" = 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && ok "остановленный обход: только сохранение" || no "stopped" 1 failed
+panel_running=1
+Z2K_HWNAT_DIR="$TMP/hw_nat"; mkdir -p "$Z2K_HWNAT_DIR"
+toggle_fastroute 1 > "$TMP/out" 2>&1
+[ "$?" = 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && grep -q 'не применяется' "$TMP/out" && ok "драйвер найден: честный no-op" || no "hw nat" noop failed
+# Ядро может принять запись без изменения значения: readback обязан отвергнуть.
+(cat() { printf '1\n'; }; fastroute_write "$TMP/nf/nf_conntrack_fastroute" 0) > "$TMP/out" 2>&1
+[ "$?" != 0 ] && ok "неподтверждённая запись отвергается" || no "readback" error success
+fastroute_write "$TMP/absent-dir/value" 0 > "$TMP/out" 2>&1
+[ "$?" != 0 ] && ok "ошибка записи не скрывается" || no "write failure" error success
+echo 0 > "$TMP/nf/nf_conntrack_fastroute"
+fastroute_status > "$TMP/out"
+grep -q 'сейчас выключен' "$TMP/out" && ok "статус читает ядро, а не флаг" || no "status" actual flag
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
