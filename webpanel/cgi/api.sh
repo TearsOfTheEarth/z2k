@@ -267,7 +267,7 @@ case "$method $path" in
         # до этого аплоадер молчит (files/z2k-stats-upload.sh).
         stats_ack=$(read_flag "Z2K_STATS_ACK" "$CONFIG_FILE" "1")
         ppe=$(read_flag "Z2K_PPE_DEOFFLOAD" "$CONFIG_FILE" "1")
-        fastroute=$(read_flag "Z2K_FASTROUTE_OFF" "$CONFIG_FILE" "1")
+        fastroute_snapshot
         auto_update=$(read_flag "Z2K_AUTO_UPDATE_ENABLED" "$CONFIG_FILE" "1")
         # Час ночного обновления. Нормализуем здесь, а не в панели: конфиг
         # правят и руками, а селектор без совпадающего варианта показал бы
@@ -295,8 +295,9 @@ case "$method $path" in
         printf ',"stats":';                  json_string "${stats:-1}"
         printf ',"stats_ack":';              json_string "${stats_ack:-1}"
         printf ',"ppe":';                    json_string "${ppe:-1}"
-        printf ',"fastroute":';              json_string "${fastroute:-1}"
-        printf ',"fastroute_status":';        json_string "$(fastroute_status)"
+        printf ',"fastroute":';              json_string "${fastroute:-0}"
+        printf ',"fastroute_available":';     json_string "$fastroute_available"
+        printf ',"fastroute_status":';        json_string "$fastroute_message"
         printf ',"auto_update":';            json_string "${auto_update:-1}"
         printf ',"au_hour":';                json_string "${au_hour:-02}"
         printf ',"autohostlist":';           json_string "${autohostlist:-0}"

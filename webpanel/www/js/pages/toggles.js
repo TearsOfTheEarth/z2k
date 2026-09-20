@@ -21,8 +21,8 @@ const TOGGLE_DEFS = [
     desc: "Раз в сутки шлёт на сервер проекта обезличенный срез: какая стратегия активна в каждом пуле и как долго держится — чтобы двигать лучшие стратегии в начало. НЕ уходит: сайты/домены, IP, провайдер, регион, любой ID устройства. Только: имя пула, номер стратегии, время удержания. Выключите, если не хотите участвовать." },
   { key: "ppe", name: "Аппаратный offload: per-flow исключение",
     desc: "На Keenetic (MediaTek) аппаратный ускоритель уводит поток в железо после первого пакета, и роутер не видит повторные ClientHello — стратегия залипает для блокировок без RST (mailsuite и т.п.). Эта опция держит окно рукопожатия на CPU только для нужных портов (родной firmware-механизм -j PPE), поэтому подбор стратегии снова работает, а общий трафик остаётся ускоренным. Работает только на совместимых Keenetic. Выключите, чтобы вернуть прежнее поведение." },
-  { key: "fastroute", name: "Программный fastpath: выключать без аппаратного NAT",
-    desc: "Выключает программный маршрутный кэш на время работы обхода, если каталог драйвера аппаратного NAT не обнаружен. Это помогает подбору стратегий видеть повторы и сбросы соединений. Выключите опцию, чтобы разрешить кэш. Остальным программным ускорением эта опция не управляет.",
+  { key: "fastroute", name: "Отключение программного fastpath",
+    desc: "Включено — маршрутный кэш отключён, чтобы обход видел повторы и сбросы соединений. Выключено — кэш включён. Доступно при работающем обходе на роутерах без драйвера аппаратного NAT.",
     extra: '<div class="t-desc" id="fastroute-status" role="status"></div>' },
   { key: "autohostlist", name: "Автохостлист",
     desc: "Обычно обходятся только домены из списков. С этой опцией движок сам замечает, что домен не открывается, и добавляет его — найденное попадает в основной список и подхватывается штатно. Плюс: сайты вне списков начинают работать без ручных добавлений. Минус: движок судит по поведению соединения и иногда ошибается, в список может попасть домен, который просто лежал сам по себе. Это смена принципа отбора трафика целиком, поэтому по умолчанию выключено." },
@@ -124,6 +124,24 @@ const TOGGLE_API_NAME = {
   auto_update: "auto-update",
   autohostlist: "autohostlist",
 };
+
+function syncFastroute(box, toggles) {
+  box.checked = toggles.fastroute === "1";
+  setLockAware(box, toggles.fastroute_available !== "1");
+  const state = $app.querySelector("#fastroute-status");
+  if (state) state.textContent = toggles.fastroute_status || "Состояние маршрутного кэша недоступно.";
+}
+
+async function refreshFastroute(box) {
+  setLockAware(box, true);
+  try {
+    const s = await apiGet("/status");
+    if (box.isConnected) syncFastroute(box, s.toggles);
+  } catch (_) {
+    const state = $app.querySelector("#fastroute-status");
+    if (state) state.textContent = "Не удалось проверить состояние маршрутного кэша.";
+  }
+}
 
 export async function renderToggles() {
   $app.innerHTML = `
@@ -296,11 +314,8 @@ export async function renderToggles() {
       const box = row.querySelector("input");
       if (t.key === "auto_update") auBox = box;
       box.checked = s.toggles[t.key] === "1";
-      if (t.key === "fastroute") {
-        const state = row.querySelector("#fastroute-status");
-        if (state) state.textContent = s.toggles.fastroute_status || "Состояние маршрутного кэша недоступно.";
-      }
-      setLockAware(box, false);
+      if (t.key === "fastroute") syncFastroute(box, s.toggles);
+      else setLockAware(box, false);
       // Повторная загрузка не должна вешать второй обработчик: два POST'а
       // на один клик — два конкурентных рестарта сервиса.
       if (!box.dataset.wired) {
@@ -535,13 +550,15 @@ async function toggleClick(key, box) {
   sw.classList.add("loading");
   box.disabled = true; // блок UI до завершения, не даём кликать ещё
   const restarts = TOGGLES_RESTART_SERVICE[key] === 1;
-  const verb = wanted === "1" ? "Включаю" : "Отключаю";
+  const verb = key === "fastroute"
+    ? (wanted === "1" ? "Отключаю" : "Включаю")
+    : (wanted === "1" ? "Включаю" : "Отключаю");
   const niceName = {
     customd: "custom.d",
     dynamic_ttl: "Динамический TTL",
     stats: "Сбор статистики",
     ppe: "PPE de-offload",
-    fastroute: "Программный fastpath",
+    fastroute: "Маршрутный кэш",
     auto_update: "Автообновление",
     autohostlist: "Автохостлист",
   }[key] || key;
@@ -554,6 +571,7 @@ async function toggleClick(key, box) {
     box.disabled = false;
     sw.classList.remove("loading");
     toastErr("Ошибка: ", e);
+    if (key === "fastroute") refreshFastroute(box);
     return;
   }
   // Backend async — открываем модалку с live-логом. Состояние switch'а
@@ -579,23 +597,14 @@ async function toggleClick(key, box) {
         // трогаем чекбокс и не обещаем, что вернули как было.
         const m = unresolvedMsg(outcome);
         if (m) toast(m, "bad");
-        resyncToggle(key, box);
+        if (key !== "fastroute") resyncToggle(key, box);
       } else {
-        toast(key === "fastroute" ? "Настройка сохранена" : (wanted === "1" ? "Включено" : "Выключено"));
+        toast(key === "fastroute" ? (wanted === "1" ? "Маршрутный кэш отключён" : "Маршрутный кэш включён") : (wanted === "1" ? "Включено" : "Выключено"));
       }
       // Чекбокс мог вернуться в прежнее положение (провал или resync) —
       // строка с временем обязана поехать за ним.
       if (key === "auto_update") auHourSync(box);
-      if (key === "fastroute") {
-        apiGet("/status").then(s => {
-          box.checked = s.toggles.fastroute === "1";
-          const state = $app.querySelector("#fastroute-status");
-          if (state) state.textContent = s.toggles.fastroute_status || "Состояние маршрутного кэша недоступно.";
-        }).catch(() => {
-          const state = $app.querySelector("#fastroute-status");
-          if (state) state.textContent = "Не удалось проверить состояние маршрутного кэша.";
-        });
-      }
+      if (key === "fastroute") refreshFastroute(box);
       if (restarts && !jobUnresolved(outcome)) setTimeout(refreshStatus, 500);
     },
   });

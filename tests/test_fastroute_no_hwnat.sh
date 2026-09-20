@@ -114,11 +114,11 @@ toggle_fastroute 1 > "$TMP/out" 2>&1
 mk_sysctl
 panel_running=0
 toggle_fastroute 1 > "$TMP/out" 2>&1
-[ "$?" = 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && ok "остановленный обход: только сохранение" || no "stopped" 1 failed
+[ "$?" != 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && grep -q '=0' "$CONFIG_FILE" && ok "остановленный обход: изменение отклонено" || no "stopped" rejected failed
 panel_running=1
 Z2K_HWNAT_DIR="$TMP/hw_nat"; mkdir -p "$Z2K_HWNAT_DIR"
 toggle_fastroute 1 > "$TMP/out" 2>&1
-[ "$?" = 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && grep -q 'не применяется' "$TMP/out" && ok "драйвер найден: честный no-op" || no "hw nat" noop failed
+[ "$?" != 0 ] && [ "$(val nf_conntrack_fastroute)" = 1 ] && grep -q 'Не применяется' "$TMP/out" && ok "драйвер найден: изменение отклонено" || no "hw nat" rejected failed
 # Ядро может принять запись без изменения значения: readback обязан отвергнуть.
 (cat() { printf '1\n'; }; fastroute_write "$TMP/nf/nf_conntrack_fastroute" 0) > "$TMP/out" 2>&1
 [ "$?" != 0 ] && ok "неподтверждённая запись отвергается" || no "readback" error success
@@ -127,6 +127,24 @@ fastroute_write "$TMP/absent-dir/value" 0 > "$TMP/out" 2>&1
 echo 0 > "$TMP/nf/nf_conntrack_fastroute"
 fastroute_status > "$TMP/out"
 grep -q 'сейчас выключен' "$TMP/out" && ok "статус читает ядро, а не флаг" || no "status" actual flag
+
+# The UI state comes from the kernel and applicability, not the saved flag.
+printf 'Z2K_FASTROUTE_OFF=1\n' > "$CONFIG_FILE"
+fastroute_snapshot
+[ "$fastroute:$fastroute_available" = 0:0 ] && ok "с hardware NAT тумблер выключен и недоступен даже при flag=1/cache=0" || no "hardware snapshot" 0:0 "$fastroute:$fastroute_available"
+Z2K_HWNAT_DIR="$TMP/absent"
+fastroute_snapshot
+[ "$fastroute:$fastroute_available" = 1:1 ] && ok "без hardware NAT cache=0 показывает включённое отключение" || no "active snapshot" 1:1 "$fastroute:$fastroute_available"
+echo 1 > "$TMP/nf/nf_conntrack_fastroute"
+fastroute_snapshot
+[ "$fastroute:$fastroute_available" = 0:1 ] && ok "cache=1 показывает выключенный тумблер вопреки flag=1" || no "inactive snapshot" 0:1 "$fastroute:$fastroute_available"
+panel_running=0
+fastroute_snapshot
+[ "$fastroute:$fastroute_available" = 0:0 ] && ok "остановленный сервис: off/disabled" || no "stopped snapshot" 0:0 "$fastroute:$fastroute_available"
+panel_running=1
+rm "$TMP/nf/nf_conntrack_fastroute"
+fastroute_snapshot
+[ "$fastroute:$fastroute_available" = 0:0 ] && ok "неизвестное состояние: off/disabled" || no "unknown snapshot" 0:0 "$fastroute:$fastroute_available"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

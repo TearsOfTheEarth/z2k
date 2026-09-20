@@ -1659,6 +1659,14 @@ start_daemons()
     # это уже сделано для autocircular строкой выше. No-op вне режима.
     ensure_autohostlist_files
 
+    # Clean old/learned Google entries even when geosite cannot refresh offline.
+    if [ -f "$ZAPRET_BASE/z2k-geosite.sh" ]; then
+        ZAPRET2_DIR="$ZAPRET_BASE" sh "$ZAPRET_BASE/z2k-geosite.sh" clean-google || {
+            echo "ERROR: failed to clean Google bypass hostlists"
+            return 1
+        }
+    fi
+
     # Использовать функции из common/linux_daemons.sh
     # standard_mode_daemons вызывает do_nfqws
     standard_mode_daemons 1
