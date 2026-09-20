@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "branch": "z2k-enhanced",
-  "seq": 111,
-  "current": "p-85.3",
+  "seq": 112,
+  "current": "p-85.4",
   "install_map": {
   "files/000-zapret2.sh": ["/opt/etc/ndm/netfilter.d/000-zapret2.sh"],
   "files/S99zapret2.new": ["/opt/etc/init.d/S99zapret2"],
@@ -136,7 +136,7 @@
   },
   "files_sha256": {
   "files/000-zapret2.sh": "b256194eacf0f89b247cb4f4c467d552afe03ebbc4879b79308eed5f914d385d",
-  "files/S99zapret2.new": "89edb3f85bfcdfb236d11df3c9d3a32c1e7d779e8b10af648cb99a7af3a7dc11",
+  "files/S99zapret2.new": "987c03565ecc9018ce5bb378d7e2aaf470a1312e386e0681d45acf71242ebdc5",
   "files/etc/z2k-roots.pem": "a6cf5a695274d4f36b401cc62183895af11e68b02417638a070465c77f4caf00",
   "files/etc/z2k-update-pub.pem": "1041720fa0dff53e2babbf547a705c2f43c30bca2c6ca2ddf7144cfe3b470a01",
   "files/fake/quic_1.bin": "f4589c57749f956bb30538197a521d7005f8b0a8723b4707e72405e51ddac50a",
@@ -212,7 +212,7 @@
   "files/z2k-warp.sh": "07310933a32a3dff4e4a791a7cf27043ca65686b56bd2d0a7b639d251ff584dd",
   "lib/auto_update.sh": "17ccd6fb67aae969b7c3b9ea51a1d022b03041d044156638c8013ba0984b1570",
   "lib/config.sh": "e1203016155fab62a7ee0351663014a1663b0dfd3cd4b5d8c5f9a2cb35813ab3",
-  "lib/config_official.sh": "8e6623cb164ea706f99111978739fd7a0cdfb9524886fad856f40bd0fcf41626",
+  "lib/config_official.sh": "104a28ef075dcd6ae3488fb00fec6043156fee11f27c8694ae8d87447de206b0",
   "lib/install.sh": "7c3b2f9b1d90947fbf6a5243228c083323fb24e76fa98cd9374382cf2ba722f2",
   "lib/menu.sh": "f42f932b4629fdb1ffca936d5386ade368ba45bd2164f2a3d3061ba03f46ee7a",
   "lib/strategies.sh": "5c1186493aeba1581e668246e4a23b9e0d5497905015c8dec5b8458683408c2d",
@@ -257,7 +257,7 @@
   "webpanel/www/fonts/FiraSans-600-latin.woff2": "f3cc7b2756c566cf8172bfd269d805c4a1eb953f6b6ce8bf2b2ddf49c5422189",
   "webpanel/www/fonts/FiraSans-700-cyrillic.woff2": "42a8013e902099b563e434d3ccb3bed87ff6d6af8d80fe51ff203f2ac487673b",
   "webpanel/www/fonts/FiraSans-700-latin.woff2": "811e73619cc2909792e8fa134c8d1ed714b898310dd4cc218fc29e40a5dc2890",
-  "webpanel/www/index.html": "390c48743ec886c233bfce3eb2efebec4c3d593f22970e7d027ec47bce16a37d",
+  "webpanel/www/index.html": "a4c4e9e01811ba12ddd7dd0c47cf73f1171b40d69148f930ac1fd75286557f88",
   "webpanel/www/js/chrome.js": "3e2217758cde6d87f4809aaf65c4aafca582b936d9c53b19abb4adac1479fdef",
   "webpanel/www/js/core/api.js": "eaa798b49c02373a1cffcdee447587f9969194323dd5471ac74a07d4af7b235f",
   "webpanel/www/js/core/auth.js": "7afe5b139737783402f45fb654b9383b24d68779aae93a0f5f1847608252ad8c",
@@ -564,6 +564,7 @@
 {"v": "p-85.0", "type": "patch", "ts": "2026-09-18T16:14:17Z", "ref": "p-85.0", "desc": "Обход заработал на роутерах с прошивкой Keenetic, перенесённой на другое железо (Cudy WR3000 и подобные): там нет аппаратного ускорителя, и программный кэш прошивки уводил соединение сразу после рукопожатия, из-за чего подбор стратегий не видел отказов и всё стояло на первой стратегии, а работал только YouTube. Теперь на таких платах этот кэш выключается вместе с остальным ускорением; на обычных Keenetic ничего не меняется. В панели на вкладке «Режимы» появился переключатель на случай, если кэш нужно оставить. Диагностика показывает, штатная прошивка или портированная, есть ли аппаратный NAT и состояние кэша.", "changed_files": ["webpanel/www/index.html", "files/S99zapret2.new", "files/z2k-diag.sh", "lib/config_official.sh", "webpanel/cgi/actions.sh", "webpanel/cgi/api.sh", "webpanel/www/js/pages/toggles.js", "UPDATES.json"], "steps": ["regen-config", "validate-config", "restart-service"], "full_install": false},
 {"v": "p-85.1", "type": "patch", "ts": "2026-09-19T08:48:58Z", "ref": "p-85.1", "desc": "Переключатель программного ускорения показывает фактическое состояние и сообщает, если изменение не применилось. Исправлено обновление адреса Instagram, который раньше ошибочно считался недоступным. Кнопка «Что нового» показывает только ещё не установленные выпуски, с переходом ко всей истории.", "changed_files": ["webpanel/www/index.html", "files/z2k-insta-ip-refresh.sh", "lib/install.sh", "webpanel/cgi/actions.sh", "webpanel/cgi/api.sh", "webpanel/www/js/pages/toggles.js", "webpanel/www/js/pages/update.js", "UPDATES.json"], "steps": [], "full_install": false},
 {"v": "p-85.2", "type": "patch", "ts": "2026-09-19T13:01:15Z", "ref": "p-85.2", "desc": "Переустановка через меню больше не возвращает устаревшую веб-панель из кэша. Удалена экспериментальная фоновая автодетекция и накопленные ею домены; ручная проверка домена сохранена.", "changed_files": ["webpanel/www/index.html", "files/S99zapret2.new", "files/z2k-config-validator.sh", "files/z2k-diag.sh", "files/z2k-scheduler.sh", "lib/auto_update.sh", "lib/config_official.sh", "lib/install.sh", "lib/menu.sh", "webpanel/cgi/actions.sh", "z2k-detect/builds/z2k-detect-linux-386", "z2k-detect/builds/z2k-detect-linux-amd64", "z2k-detect/builds/z2k-detect-linux-arm", "z2k-detect/builds/z2k-detect-linux-arm64", "z2k-detect/builds/z2k-detect-linux-mips", "z2k-detect/builds/z2k-detect-linux-mips64le", "z2k-detect/builds/z2k-detect-linux-mipsle", "z2k-detect/builds/z2k-detect-linux-ppc64", "z2k-detect/builds/z2k-detect-linux-riscv64", "z2k.sh", "UPDATES.json"], "steps": ["regen-config", "validate-config", "refresh-binaries", "restart-service"], "full_install": false},
-{"v": "p-85.3", "type": "patch", "ts": "2026-09-20T07:00:08Z", "ref": "p-85.3", "desc": "Из списков обхода убраны google.com и его поддомены, кроме meet.google.com; обновление списков больше не возвращает их обратно. Переключатель отключения программного fastpath показывает фактическое состояние и недоступен там, где настройка не применяется.", "changed_files": ["webpanel/www/index.html", "files/S99zapret2.new", "files/lists/extra_strats/TCP/RKN/List.txt", "files/lists/extra_strats/TCP/YT/List.txt", "files/lists/extra_strats/TCP/YT_GV/List.txt", "files/lists/extra_strats/UDP/YT/List.txt", "files/z2k-geosite.sh", "webpanel/cgi/actions.sh", "webpanel/cgi/api.sh", "webpanel/www/js/pages/toggles.js", "UPDATES.json"], "steps": ["restart-service"], "full_install": false}
+{"v": "p-85.3", "type": "patch", "ts": "2026-09-20T07:00:08Z", "ref": "p-85.3", "desc": "Из списков обхода убраны google.com и его поддомены, кроме meet.google.com; обновление списков больше не возвращает их обратно. Переключатель отключения программного fastpath показывает фактическое состояние и недоступен там, где настройка не применяется.", "changed_files": ["webpanel/www/index.html", "files/S99zapret2.new", "files/lists/extra_strats/TCP/RKN/List.txt", "files/lists/extra_strats/TCP/YT/List.txt", "files/lists/extra_strats/TCP/YT_GV/List.txt", "files/lists/extra_strats/UDP/YT/List.txt", "files/z2k-geosite.sh", "webpanel/cgi/actions.sh", "webpanel/cgi/api.sh", "webpanel/www/js/pages/toggles.js", "UPDATES.json"], "steps": ["restart-service"], "full_install": false},
+{"v": "p-85.4", "type": "patch", "ts": "2026-09-20T07:19:08Z", "ref": "p-85.4", "desc": "Удалён автоматически включавшийся обход подсети Cloudflare вне доменных списков. При обновлении профиль cf_extra отключается у всех, а из ротатора удаляются только его сохранённые записи. Проверка и обход блока 16 КБ сохранены.", "changed_files": ["webpanel/www/index.html", "files/S99zapret2.new", "lib/config_official.sh", "UPDATES.json"], "steps": ["regen-config", "validate-config", "restart-service"], "full_install": false}
   ]
 }
