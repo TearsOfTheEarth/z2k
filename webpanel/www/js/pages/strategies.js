@@ -102,9 +102,12 @@ export async function renderState() {
         Пул, которому вы задали <a href="#/strategies">свою стратегию</a>, здесь
         не появится: подбор для него выключен, а работает ровно ваша строка.
       </p>
-      <div class="btn-row" style="margin-bottom:10px">
+      <div class="btn-row state-tools" style="margin-bottom:10px">
         <button class="btn" id="state-refresh">Обновить</button>
         <button class="btn btn-danger" id="state-clear-all">Удалить все записи</button>
+        <input id="state-search" class="state-search" type="search"
+          placeholder="Домен или часть домена" aria-label="Поиск по домену"
+          autocomplete="off" autocapitalize="off" spellcheck="false">
       </div>
       <div id="state-body">${skeletonLines(6)}</div>
     </div>
@@ -114,6 +117,13 @@ export async function renderState() {
   // «Обновить» button into a no-op that re-renders stale rows.
   document.getElementById("state-refresh").addEventListener("click", () => loadState());
   document.getElementById("state-clear-all").addEventListener("click", stateClearAll);
+  // Поиск — операция ВИДА, как и сортировка: весь набор уже в браузере,
+  // поэтому идём через resortState (кэш), а не через loadState() с сетью.
+  // На роутере /state стоит секунды, и ходить туда на каждую букву значило бы
+  // сделать поле непригодным ровно там, где оно нужнее всего.
+  // Передавать resortState напрямую безопасно: аргументы он игнорирует, и
+  // Event не попадает в useCache — та же ловушка, что описана выше у «Обновить».
+  document.getElementById("state-search").addEventListener("input", resortState);
   loadState();
 }
 
@@ -230,10 +240,32 @@ async function loadState(useCache) {
       if (tail === "6") return { name: raw.slice(0, cut), fam: "IPv6" };
       return { name: raw, fam: "" };
     };
-    const visible = entries.filter(e => e.host !== "nohost");
+    const all = entries.filter(e => e.host !== "nohost");
+
+    if (!all.length) {
+      body.innerHTML = `<p style="color:var(--text-muted)">пока пусто — ни одна стратегия ещё не закреплена</p>`;
+      return;
+    }
+
+    // ПОИСК ПО ИМЕНИ. Ищем по имени БЕЗ суффикса семейства: человек набирает
+    // «apple», а в ключе лежит «gs-loc5.apple.com|4», и вертикальная черта с
+    // цифрой — служебная часть, которой в поле никто не наберёт.
+    //
+    // Подстрока, а не начало имени: у поддоменных групп искомое почти всегда
+    // в середине (scontent-a12-3.xx.fbcdn.net), и поиск «по началу» не нашёл
+    // бы ничего именно там, где записей сотни.
+    //
+    // Поле живёт в панели кнопок, СНАРУЖИ #state-body: эта функция заменяет
+    // его innerHTML целиком, и поле внутри пересоздавалось бы на каждой букве,
+    // теряя фокус и каретку.
+    const searchEl = document.getElementById("state-search");
+    const query = searchEl ? searchEl.value.trim().toLowerCase() : "";
+    const visible = query
+      ? all.filter(e => splitFamily(e.host).name.toLowerCase().includes(query))
+      : all;
 
     if (!visible.length) {
-      body.innerHTML = `<p style="color:var(--text-muted)">пока пусто — ни одна стратегия ещё не закреплена</p>`;
+      body.innerHTML = `<p style="color:var(--text-muted)">Ничего не найдено. Измените поисковый запрос.</p>`;
       return;
     }
     const nowSec = Math.floor(Date.now() / 1000);
@@ -377,7 +409,14 @@ async function loadState(useCache) {
     const groupHtml = (b) => {
       // Открытость помним по СОСТАВНОМУ ключу: googlevideo.com в quic и в
       // gv_tcp — разные группы, и сворачиваться они обязаны независимо.
-      const open = stateOpenGroups.has(b.gkey);
+      //
+      // Во время поиска группы раскрыты принудительно: иначе находка прячется
+      // за свёрнутым заголовком, и поиск показывает, что совпадение ГДЕ-ТО
+      // есть, вместо того чтобы показать саму строку. Флаг раскрытия при этом
+      // в stateOpenGroups НЕ пишется — он переживает перезагрузку страницы, и
+      // одна отфильтрованная выдача оставила бы после себя навсегда
+      // развёрнутыми полтысячи строк.
+      const open = query ? true : stateOpenGroups.has(b.gkey);
       const n = b.rows.length;
       const keys = [b.pool];
       const nFrozen = b.rows.filter(e => e.mode === "frozen").length;
@@ -499,7 +538,13 @@ async function loadState(useCache) {
       if (!head) return;
       head.addEventListener("click", () => {
         const g = tb.dataset.group;
-        const open = !stateOpenGroups.has(g);
+        // Считаем от НАРИСОВАННОГО, а не от запомненного. Во время поиска
+        // группа раскрыта принудительно, и в stateOpenGroups её при этом нет:
+        // «инвертировать запомненное» дало бы open=true у уже раскрытой
+        // группы, то есть первый клик «свернуть» молча не сработал бы.
+        // Класс на tbody — единственный источник, который всегда совпадает
+        // с тем, что человек видит.
+        const open = tb.classList.contains("sg-closed");
         if (open) stateOpenGroups.add(g); else stateOpenGroups.delete(g);
         saveOpenGroups();
         tb.classList.toggle("sg-closed", !open);

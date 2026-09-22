@@ -897,6 +897,34 @@ body[data-sidebar="collapsed"] { padding-left: var(--sidebar-w-collapsed); }
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* ПОИСК НАД ТАБЛИЦЕЙ СТРАТЕГИЙ.
+
+   Без видимой подписи: строка кнопок и так отъедает высоту у самой таблицы,
+   ради которой страница открыта, а назначение поля целиком читается из
+   placeholder. Имя для скринридера ушло в aria-label — оно обязано остаться,
+   иначе поле объявляется просто «поиск, поле ввода».
+
+   align-items:center, потому что у .btn-row по умолчанию stretch: поле
+   растянулось бы по высоте кнопок, и в ряду с двумя кнопками разной массы это
+   выглядит как третья кнопка. margin-left:auto прижимает его вправо — слева
+   действия над таблицей, справа то, что таблицу сужает. */
+.state-tools { align-items: center; }
+.state-search {
+  margin-left: auto; min-width: 220px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit; font-size: 14px; line-height: normal;
+  min-height: 0; padding: 8px 12px;
+}
+.state-search:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 600px) {
+  /* Своя строка во всю ширину, а не огрызок справа: на телефоне .btn-row и так
+     переносится, и прижатое вправо узкое поле оказалось бы вдвое уже кнопок.
+     16px — чтобы iOS не зумил страницу при фокусе, как и у .wl-search. */
+  .state-search { flex-basis: 100%; margin-left: 0; font-size: 16px; }
+}
+
 .state-table {
   width: 100%;
   border-collapse: collapse;

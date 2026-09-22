@@ -314,6 +314,66 @@ const SC = {
             localStorage.getItem("z2k-state-open-groups"));
     },
   },
+  // ПОИСК ПО ДОМЕНУ. Таблица на роутере — это сотни строк (у владельца 109,
+  // из них до сотни поддоменов одного discord.media), и поле поиска здесь не
+  // украшение, а единственный способ найти нужный сайт. Проверяется не только
+  // «фильтрует», но и три решения, принятые вокруг фильтра.
+  search: {
+    setup() {},
+    async run() {
+      const input = sel("#state-search");
+      const type = async (v) => { input.value = v; input.fire("input"); await sleep(40); };
+      const before = CALLS["/state"] || 0;
+
+      await type("discord.media");
+      let html = sel("#state-body").innerHTML;
+      let b = blocks(html);
+      check("непопавшие строки убраны",
+            !/chatgpt\.com|bbc\.co\.uk|1\.2\.3\.4|discordapp\.com/.test(html),
+            html.replace(/\s+/g, " ").slice(0, 300));
+      const dm = b.find(x => x.group === "discord.media" && x.pool === "rkn_tcp");
+      const dmq = b.find(x => x.group === "discord.media" && x.pool === "quic");
+      check("совпавшие группы сохранили состав",
+            !!dm && !!dmq && dm.members === 3 && dmq.members === 2,
+            JSON.stringify(b.map(x => x.raw + ":" + x.members)));
+      // Найденное обязано быть ВИДНО. Иначе поиск сообщает, что совпадение
+      // где-то есть, вместо того чтобы показать саму строку.
+      check("во время поиска группы раскрыты",
+            dm && dmq && !/\bsg-closed\b/.test(dm.cls) && !/\bsg-closed\b/.test(dmq.cls),
+            JSON.stringify([dm && dm.cls, dmq && dmq.cls]));
+      // Раскрытие живёт в localStorage и переживает перезагрузку страницы.
+      // Одна отфильтрованная выдача не должна оставить полтысячи строк
+      // развёрнутыми навсегда.
+      check("авто-раскрытие не попало в память",
+            !(localStorage.getItem("z2k-state-open-groups") || "").includes("discord.media"),
+            localStorage.getItem("z2k-state-open-groups"));
+      // Весь набор уже в браузере. На роутере /state стоит секунды, и запрос
+      // на каждую букву сделал бы поле непригодным.
+      check("поиск не ходит в сеть", (CALLS["/state"] || 0) === before,
+            "запросов /state: " + (CALLS["/state"] || 0) + ", было " + before);
+
+      // Суффикс семейства — служебная часть ключа, в поле его никто не наберёт.
+      await type("|4");
+      check("суффикс семейства в поиск не попадает",
+            /Ничего не найдено/.test(sel("#state-body").innerHTML),
+            sel("#state-body").innerHTML.replace(/\s+/g, " ").slice(0, 200));
+
+      await type("такого.домена.нет");
+      check("пустая выдача сообщает об этом, а не молчит",
+            /Ничего не найдено/.test(sel("#state-body").innerHTML),
+            sel("#state-body").innerHTML.replace(/\s+/g, " ").slice(0, 200));
+
+      await type("");
+      html = sel("#state-body").innerHTML;
+      b = blocks(html);
+      check("очистка поля возвращает все строки",
+            /chatgpt\.com/.test(html) && /bbc\.co\.uk/.test(html) && /discordapp\.com/.test(html),
+            html.replace(/\s+/g, " ").slice(0, 300));
+      check("после очистки группы снова свёрнуты",
+            b.filter(x => x.group).every(x => /\bsg-closed\b/.test(x.cls)),
+            JSON.stringify(b.filter(x => x.group).map(x => x.raw + ":" + x.cls)));
+    },
+  },
 };
 
 (async () => {
@@ -339,7 +399,7 @@ run_scen() {
         esac
     done
 }
-for scen in render tiebreak remembered toggle; do
+for scen in render tiebreak remembered toggle search; do
     out=$(run_scen "$JS" "$scen")
     printf '%s\n' "$out"
     PASS=$((PASS + $(printf '%s\n' "$out" | grep -c '^\[PASS\]')))
@@ -369,8 +429,12 @@ meta "зоны второго уровня не учитываются" render '
 meta "группы раскрыты по умолчанию" render 's/<tbody class="sg\${open ? "" : " sg-closed"}"/<tbody class="sg"/'
 meta "сортировка по домену без родителя" render 's/case "host":     av = meta\.get(a)\.group + "\\u0000" + String(a\.key || "") + "\\u0000" + /case "host":     av = /'
 meta "равные строки снова в порядке файла" tiebreak 's/return ah < bh ? -1 : ah > bh ? 1 : 0;/return 0;/'
-meta "раскрытие не запоминается" remembered 's/const open = stateOpenGroups\.has(b\.gkey);/const open = false;/'
+meta "раскрытие не запоминается" remembered 's/const open = query ? true : stateOpenGroups\.has(b\.gkey);/const open = false;/'
 meta "клик не сохраняет раскрытие" toggle 's/^ *saveOpenGroups();$//'
+meta "поиск ничего не фильтрует" search 's/? all\.filter(e => splitFamily(e\.host)\.name\.toLowerCase()\.includes(query))/? all/'
+meta "найденное прячется в свёрнутой группе" search 's/const open = query ? true : stateOpenGroups\.has(b\.gkey);/const open = stateOpenGroups.has(b.gkey);/'
+meta "поиск идёт по ключу вместе с суффиксом семейства" search 's/splitFamily(e\.host)\.name\.toLowerCase()\.includes(query)/String(e.host).toLowerCase().includes(query)/'
+meta "авто-раскрытие записывается в память" search 's/const open = query ? true : stateOpenGroups\.has(b\.gkey);/const open = query ? (stateOpenGroups.add(b.gkey), saveOpenGroups(), true) : stateOpenGroups.has(b.gkey);/'
 
 printf '\nPASSED: %d\nFAILED: %d\nSKIPPED: %d\n' "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" = 0 ]
