@@ -341,41 +341,6 @@ local function ensure_autostate_record(askey, hostkey)
   return autostate[askey][hostkey]
 end
 
--- Runtime-only, bounded hints: state.tsv also contains unconfirmed candidates.
--- Share a starting number, never records, counters, pins or learned SNI.
-local youtube_hints = {}
-local function youtube_family(askey, hostn)
-  if askey ~= "yt_tcp" or not hostn then return nil end
-  local host, family = hostn:match("^(.-)|([46])$")
-  if host and (host == "youtube.com" or host:sub(-12) == ".youtube.com") then return family end
-end
-
-local function seed_youtube_hint(askey, hostn, hrec)
-  if not hrec or hrec.nstrategy then return end
-  -- Even a saved strategy 1 is an explicit per-host starting point.
-  if state[askey] and state[askey][hostn] then return end
-  local family = youtube_family(askey, hostn)
-  local hint = family and youtube_hints[family]
-  if not hint then return end
-  local age = now_t() - hint.ts
-  if age < 0 or age > 300 or hint.record.nstrategy ~= hint.strategy
-     or hint.record.generation ~= hint.generation then
-    youtube_hints[family] = nil
-    return
-  end
-  hrec.nstrategy = hint.strategy
-end
-
-local function remember_youtube_hint(askey, hostn, hrec, desync)
-  local family = youtube_family(askey, hostn)
-  local crec = desync.track and desync.track.lua_state and desync.track.lua_state.automate
-  if not family or not crec or not hrec or not hrec.nstrategy
-     or crec.host_record ~= hrec or crec.generation ~= hrec.generation
-     or crec.nstrategy ~= hrec.nstrategy then return end
-  youtube_hints[family] = {strategy=hrec.nstrategy, record=hrec,
-    generation=hrec.generation, ts=now_t()}
-end
-
 local function get_record_for_desync(desync, do_seed)
   if do_seed then load_state() end
   local hkf = get_hostkey_func(desync)
@@ -634,7 +599,6 @@ if type(circular) == "function" then
 
     pcall(function()
       apply_pin(askey_before, hostn_before, hrec_before)
-      seed_youtube_hint(askey_before, hostn_before, hrec_before)
       if hrec_before and not hrec_before.on_strategy_changed then
         hrec_before.on_strategy_changed = function(rec)
           persist_if_changed(askey_before, hostn_before, rec)
@@ -653,7 +617,6 @@ if type(circular) == "function" then
     end
 
     -- pcall ONLY to guarantee hostname restore before re-propagating errors.
-    local nocheck_before = conn_record_flags(desync)
     local ok, verdict_or_err = pcall(orig_circular, ctx, desync)
     local verdict
     if ok then
@@ -731,11 +694,6 @@ if type(circular) == "function" then
         local server_active_event = server_active_after
         local successful_state = nocheck_after and (not failure_after)
           and (not neutral_after) and (not server_active_event)
-        -- Learn only a newly confirmed success, not an outgoing candidate,
-        -- a latched verdict, or a late reply from a previous strategy generation.
-        if successful_state and not nocheck_before and desync and not desync.outgoing then
-          remember_youtube_hint(askey, hostn, hrec, desync)
-        end
         local response_state = has_positive_incoming_response(desync)
           and (not failure_after) and (not neutral_after) and (not server_active_event)
         -- QUIC flows may not reliably trigger the success detector, but
@@ -786,5 +744,5 @@ z2k_state_persist = {
   state_file = function() return STATE_FILE_PRIMARY end,
   _state = function() return state end,
   _set_interval = function(n) write_interval = tonumber(n) or write_interval end,
-  _reset = function() if type(timer_del) == "function" then timer_del("z2k_state_flush") end; flush_pending = false; youtube_hints = {}; loaded = false; state = {}; last_write = 0; last_written = {}; last_reconcile = 0 end,
+  _reset = function() if type(timer_del) == "function" then timer_del("z2k_state_flush") end; flush_pending = false; loaded = false; state = {}; last_write = 0; last_written = {}; last_reconcile = 0 end,
 }
