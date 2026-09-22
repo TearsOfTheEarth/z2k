@@ -3519,3 +3519,51 @@ uninstall_async() {
     echo "$!" > "/tmp/z2k-job-$job_id.pid"
     printf '%s' "$job_id"
 }
+
+# Compare-and-swap for whole whitelist edits. Existing add/import/delete share
+# this lock; a stale browser must never erase a later edit from another tab.
+whitelist_revision() {
+    if [ -f "$WHITELIST_FILE" ]; then
+        sha256sum "$WHITELIST_FILE" 2>/dev/null | cut -d' ' -f1
+    else
+        printf '' | sha256sum | cut -d' ' -f1
+    fi
+}
+
+whitelist_save() (
+    expected="$1"
+    case "$expected" in ''|*[!a-f0-9]*) echo 'Неизвестная версия списка. Обновите список.' >&2; exit 2 ;; esac
+    [ "${#expected}" = 64 ] || exit 2
+    mkdir -p "$LISTS_DIR" || exit 1
+    raw=$(mktemp "$WHITELIST_FILE.raw.XXXXXX") || exit 1
+    tmp=$(mktemp "$WHITELIST_FILE.edit.XXXXXX") || { rm -f "$raw"; exit 1; }
+    locked=0
+    trap 'rm -f "$raw" "$tmp"; [ "$locked" = 0 ] || _list_unlock "$WHITELIST_FILE"' EXIT
+    head -c 1048577 > "$raw" || exit 1
+    [ "$(wc -c < "$raw")" -le 1048576 ] || { echo 'Список больше 1 МБ.' >&2; exit 2; }
+    # Validate the entire candidate before touching the live file. Keep comments
+    # and blank lines; normalize only domain records, deduplicating case-insensitively.
+    LC_ALL=C awk '
+        {
+            sub(/\r$/, ""); line=$0
+            sub(/^[ \t]+/, ""); sub(/[ \t]+$/, "")
+            if($0=="" || substr($0,1,1)=="#") {print line; next}
+            d=tolower($0); valid=1
+            if(length(d)>253 || d !~ /^[a-z0-9.-]+$/ || d ~ /^[0-9.]+$/) valid=0
+            n=split(d,labels,".")
+            for(i=1;i<=n;i++) if(length(labels[i])<1 || length(labels[i])>63 || labels[i] ~ /^-/ || labels[i] ~ /-$/) valid=0
+            if(!valid) {printf "Некорректный домен в строке %d. Укажите имя сайта без адреса, протокола и пути.\n", NR > "/dev/stderr"; bad=1; next}
+            if(!seen[d]++) print d
+        }
+        END {exit bad ? 2 : 0}
+    ' "$raw" > "$tmp" || exit 2
+    _list_lock "$WHITELIST_FILE" || { echo 'Список занят. Повторите сохранение.' >&2; exit 1; }
+    locked=1
+    current=$(whitelist_revision)
+    [ "$current" = "$expected" ] || {
+        echo 'Список уже изменён в другой вкладке. Скопируйте свой текст и обновите список перед повторным сохранением.' >&2
+        exit 3
+    }
+    chmod 644 "$tmp" && mv -f "$tmp" "$WHITELIST_FILE" || { echo 'Не удалось сохранить список.' >&2; exit 1; }
+    whitelist_revision
+)

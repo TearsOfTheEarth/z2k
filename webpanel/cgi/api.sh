@@ -235,7 +235,7 @@ panel_auth_gate
 # Крупные загрузки (списки, своя стратегия) идут через read_body_raw и свои
 # собственные потолки в мегабайтах — их это ограничение не касается.
 case "$PATH_INFO" in
-    /warp/list/save|/warp/devices/save|/whitelist/import|/strategy/pool/save|/strategy/pool/validate|/state/bulk) ;;
+    /warp/list/save|/warp/devices/save|/whitelist/import|/strategy/pool/save|/strategy/pool/validate|/state/bulk|/whitelist/save) ;;
     *)
         if [ "${CONTENT_LENGTH:-0}" -gt "$Z2K_MAX_BODY" ] 2>/dev/null; then
             json_fail "413 Payload Too Large" "запрос слишком большой"
@@ -490,16 +490,45 @@ case "$method $path" in
         ;;
 
     "GET /whitelist")
+        mkdir -p "$LISTS_DIR" || json_fail "500 Internal Server Error" "не удалось открыть список"
+        _list_lock "$WHITELIST_FILE" || json_fail "409 Conflict" "список занят, повторите"
+        wl_rev=$(whitelist_revision)
+        wl_text=$(cat "$WHITELIST_FILE" 2>/dev/null) || wl_text=""
+        _list_unlock "$WHITELIST_FILE"
+        [ -n "$wl_rev" ] || json_fail "500 Internal Server Error" "не удалось прочитать версию списка"
         json_header
-        printf '{"ok":true,"domains":['
+        printf '{"ok":true,"revision":'
+        json_string "$wl_rev"
+        printf ',"text":'
+        json_string "$wl_text"
+        printf ',"domains":['
         first=1
-        whitelist_list | while IFS= read -r d; do
+        printf '%s\n' "$wl_text" | grep -vE '^[[:space:]]*(#|$)' | while IFS= read -r d; do
             [ -z "$d" ] && continue
             if [ "$first" = "1" ]; then first=0; else printf ','; fi
             json_string "$d"
         done
         printf ']}\n'
         exit 0
+        ;;
+
+    "POST /whitelist/save")
+        [ "${CONTENT_LENGTH:-0}" -le 1048576 ] 2>/dev/null || json_fail "413 Payload Too Large" "список больше 1 МБ"
+        wl_rev=$(form_value "${QUERY_STRING:-}" revision)
+        wl_errfile=$(mktemp) || json_fail "500 Internal Server Error" "не удалось создать временный файл"
+        if wl_result=$(read_body_raw | whitelist_save "$wl_rev" 2>"$wl_errfile"); then
+            rm -f "$wl_errfile"
+            json_header
+            printf '{"ok":true,"revision":'
+            json_string "$wl_result"
+            printf '}\n'
+            exit 0
+        else
+            wl_rc=$?
+            wl_error=$(cat "$wl_errfile"); rm -f "$wl_errfile"
+            case "$wl_rc" in 3) wl_status="409 Conflict" ;; 2) wl_status="400 Bad Request" ;; *) wl_status="500 Internal Server Error" ;; esac
+            json_fail "$wl_status" "${wl_error:-не удалось сохранить список}"
+        fi
         ;;
 
     "POST /whitelist/add"|"POST /whitelist/delete")
