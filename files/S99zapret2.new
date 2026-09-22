@@ -1311,7 +1311,7 @@ z2k_seed_user_exclusions()
 # KEENETIC FIREWALL FUNCTIONS (замена OpenWrt network.sh зависимостей)
 # ==============================================================================
 
-# Shared with the self-healer so secondary policy WANs receive the same rules.
+# Shared with the self-healer so every selected main-table WAN gets the same rules.
 # shellcheck source=lib/wan.sh
 . "$ZAPRET_BASE/lib/wan.sh"
 
@@ -1328,11 +1328,7 @@ get_default_ifaces6()
 get_wan_ifaces4()
 {
 	local ifaces
-	if [ -n "$WAN_IFACE" ]; then
-		ifaces="$(echo "${WAN_IFACE:-}" | tr ',' ' ')"
-	else
-		ifaces="$(get_default_ifaces4)"
-	fi
+	ifaces="$(z2k_wan_ifaces -4 "${WAN_IFACE:-}")" || return 1
 	ifaces="$(echo "$ifaces" | xargs)"
 	if [ -n "$ifaces" ] && exists ip; then
 		local i
@@ -1347,11 +1343,7 @@ get_wan_ifaces4()
 get_wan_ifaces6()
 {
 	local ifaces
-	if [ -n "$WAN_IFACE" ]; then
-		ifaces="$(echo "${WAN_IFACE:-}" | tr ',' ' ')"
-	else
-		ifaces="$(get_default_ifaces6)"
-	fi
+	ifaces="$(z2k_wan_ifaces -6 "${WAN_IFACE:-}")" || return 1
 	ifaces="$(echo "$ifaces" | xargs)"
 	if [ -n "$ifaces" ] && exists ip; then
 		local i
@@ -2452,7 +2444,7 @@ start_fw()
     # Использовать официальную функцию из common/linux_fw.sh
     z2k_connmark_init
     z2k_conntrack_tune_start
-    z2k_sweep_auto_vpn_nfqueue
+    z2k_sweep_stale_wan_nfqueue
     zapret_apply_firewall
     # Локалка — мимо десинка всегда (см. коммент у z2k_seed_local_exclusions).
     # После apply_firewall: сеты к этому моменту созданы апстримом, а `-exist`
@@ -2526,22 +2518,29 @@ stop_fw()
 # Sweep them by OUR queue number only. --queue-num $QNUM is z2k's own; other
 # software's NFQUEUE rules use different numbers and are left alone. Rules are
 # turned from `-A` into `-D` and fed back, which is exact - no pattern guessing.
-# Additive NDM/self-heal starts must also remove VPN rules installed by 85.7/8.
-# Select by exact queue number and known tunnel device; never flush NDM chains.
-z2k_sweep_auto_vpn_nfqueue()
+# Additive NDM/self-heal starts remove rules bound to WANs no longer selected by
+# the same main-table discovery used to add them. A successful nonempty route
+# read is required; unknown or empty state is never grounds for deletion.
+z2k_sweep_stale_wan_nfqueue()
 {
-    local qn="${QNUM:-200}" save restore fam rule dev explicit
-    explicit=" $(printf '%s' "${WAN_IFACE:-}" | tr ',' ' ' | xargs) "
+    local qn="${QNUM:-200}" save restore fam rule dev selected chain dir
     for fam in 4 6; do
+        selected=$(z2k_wan_ifaces "-$fam" "${WAN_IFACE:-}") || continue
+        [ -n "$selected" ] || continue
         if [ "$fam" = 4 ]; then save=iptables-save; restore=iptables; else save=ip6tables-save; restore=ip6tables; fi
         command -v "$save" >/dev/null 2>&1 || continue
         "$save" -t mangle 2>/dev/null | awk -v q="$qn" '
             $1=="-A" {for(i=1;i<NF;i++) if($i=="--queue-num" && $(i+1)==q) {print; break}}
         ' | while IFS= read -r rule; do
-            dev=$(printf '%s\n' "$rule" | awk '{for(i=1;i<NF;i++) if($i=="-i" || $i=="-o") {print $(i+1); exit}}')
+            chain=$(printf '%s\n' "$rule" | awk '{print $2}')
+            case "$chain" in
+                POSTROUTING) dir=-o ;;
+                INPUT|FORWARD) dir=-i ;;
+                *) continue ;;
+            esac
+            dev=$(printf '%s\n' "$rule" | awk -v d="$dir" '{for(i=3;i<NF;i++) if($i==d) {print $(i+1); exit}}')
             [ -n "$dev" ] || continue
-            case "$explicit" in *" $dev "*) continue ;; esac
-            z2k_wan_auto_excluded "$dev" || continue
+            case " $selected " in *" $dev "*) continue ;; esac
             # Rule text originates from iptables-save, not user input.
             # shellcheck disable=SC2086
             "$restore" -w -t mangle -D ${rule#-A } 2>/dev/null ||

@@ -22,7 +22,13 @@ retaining the normal QUIC block and all unrelated live/persistent rules.
 Deploying this server change is separate from previewing it on the owner's
 router: the public fleet is still on p-85.8 until a release is authorized.
 
-## Multi-WAN correction
+## Multi-WAN correction (superseded)
+
+The all-table/blacklist approach below was an intermediate preview. The current
+correction restores main-table discovery; see [WAN discovery](multiwan-2026-09-22.md).
+The Telegram retirement and its recorded verification remain unchanged.
+
+### Earlier implementation
 
 The introduced regression was automatic discovery of all-table defaults with
 no exclusion for native VPN interfaces. A fixture with main ppp0 and policy
