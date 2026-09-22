@@ -1,6 +1,28 @@
 #!/bin/sh
 # Shared WAN discovery for the firewall and its periodic repair. Read-only:
 # never change provider priorities, policy rules or the user's WAN_IFACE.
+# Only automatic discovery is filtered. WAN_IFACE remains an explicit opt-in
+# for users who intentionally run desync through a tunnel. Do not query netlink:
+# ip link can hang on an unhealthy native WireGuard driver (issue #18).
+z2k_wan_auto_excluded() {
+    local dev="$1" sys="${Z2K_NET_CLASS:-/sys/class/net}" kind
+    case "$dev" in
+        lo|br[0-9]*|z2ktg*|z2ktun*|nwg[0-9]*|wg[0-9]*|awg[0-9]*|tun[0-9]*|tap[0-9]*|vpn[0-9]*|gre[0-9]*|gretap[0-9]*|ip6gre[0-9]*|ip6tnl[0-9]*|sit[0-9]*|ipip[0-9]*|vti[0-9]*|vti6[0-9]*|xfrm[0-9]*) return 0 ;;
+    esac
+    [ ! -d "$sys/$dev/bridge" ] || return 0
+    # tun_flags also identifies renamed TAP devices (Ethernet type 1).
+    [ ! -e "$sys/$dev/tun_flags" ] || return 0
+    kind=$(cat "$sys/$dev/type" 2>/dev/null) || kind=
+    case "$kind" in
+        768|769|772|776|778|823) return 0 ;;
+        # ARPHRD_NONE is also used by some USB raw-IP modem drivers. Unlike
+        # WireGuard/XFRM, those have a backing hardware device in sysfs.
+        65534) [ -e "$sys/$dev/device" ] || return 0 ;;
+    esac
+    # Ethernet/VLAN/Wi-Fi/USB and PPP (including provider PPPoE) are retained.
+    return 1
+}
+
 z2k_wan_ifaces() {
     local family="$1" override="${2:-}" routes candidates dev
     if [ -n "$override" ]; then
@@ -33,9 +55,7 @@ z2k_wan_ifaces() {
         }
     ')
     for dev in $candidates; do
-        case "$dev" in lo|br[0-9]*|z2ktg*|z2ktun*) continue ;; esac
-        # Do not query netlink link state: it can block on a broken VPN driver.
-        [ ! -d "${Z2K_NET_CLASS:-/sys/class/net}/$dev/bridge" ] || continue
+        z2k_wan_auto_excluded "$dev" && continue
         printf '%s\n' "$dev"
     done | xargs
 }

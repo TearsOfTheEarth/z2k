@@ -163,6 +163,32 @@ got=$(run6)
 got=$(z2k_wan_ifaces -4 'usb0,eth3 usb0')
 [ "$got" = 'usb0 eth3' ] && ok 'explicit WAN list wins and is deduplicated' || no 'override' 'usb0 eth3' "$got"
 rm -f "$TMP/route4main"
+# Real regression: a VPN default in a policy table is not another ISP.
+cat > "$TMP/route4" <<'EOF'
+default dev ppp0
+default dev usb0 table 16400
+default dev apcli0 table 16401
+default dev nwg0 table 16402
+default dev tun0 table 16403
+default dev awg0 table 16404
+EOF
+got=$(run4)
+[ "$got" = 'ppp0 usb0 apcli0' ] && ok 'dual provider + Wi-Fi retain ISP uplinks, never native VPN' || no 'VPN default is not ISP' 'ppp0 usb0 apcli0' "$got"
+mkdir -p "$TMP/net/custom-wg" "$TMP/net/custom-tap" "$TMP/net/ppp0" "$TMP/net/wwan0/device"
+printf '65534\n' > "$TMP/net/wwan0/type"
+printf '65534\n' > "$TMP/net/custom-wg/type"
+: > "$TMP/net/custom-tap/tun_flags"
+printf '512\n' > "$TMP/net/ppp0/type"
+export Z2K_NET_CLASS="$TMP/net"
+printf 'default dev ppp0\ndefault dev wwan0 table 102\ndefault dev custom-wg table 100\ndefault dev custom-tap table 101\n' > "$TMP/route4"
+got=$(run4)
+[ "$got" = "ppp0 wwan0" ] && ok 'renamed VPN excluded; PPPoE and raw-IP USB modem retained' || no 'renamed VPN/raw modem' "ppp0 wwan0" "$got"
+printf 'default dev ppp0\ndefault dev nwg0 table 100\ndefault dev tun0 table 101\n' > "$TMP/route6"
+got=$(run6)
+[ "$got" = ppp0 ] && ok 'IPv6 VPN defaults excluded' || no 'IPv6 VPN' ppp0 "$got"
+got=$(z2k_wan_ifaces -4 'nwg0,tun0 nwg0')
+[ "$got" = 'nwg0 tun0' ] && ok 'explicit VPN override remains available' || no 'VPN override' 'nwg0 tun0' "$got"
+unset Z2K_NET_CLASS
 # A failed all-table dump falls back to main; an empty successful dump does not.
 cat > "$BIN/ip" <<'EOF'
 #!/bin/sh

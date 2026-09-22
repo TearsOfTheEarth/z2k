@@ -279,6 +279,8 @@ cat > "$BIN/ip" <<'EOF'
 echo 'default dev eth3'
 case "$*" in *'table all'*) echo 'default dev usb0 table 16400' ;; esac
 echo 'default dev z2ktg0 table 988'
+echo 'default dev nwg0 table 16401'
+echo 'default dev tun0 table 16402'
 EOF
 printf 'ENABLED=1\nNFQWS2_PORTS_TCP=443\nNFQWS2_TCP_PKT_OUT=9\nNFQWS2_TCP_PKT_IN=10\n' > "$CFG"
 reset; RULES="POSTROUTING:tcp INPUT:tcp FORWARD:tcp" run
@@ -292,7 +294,7 @@ cat > "$BIN/iptables" <<EOF
 EOF
 chmod +x "$BIN/iptables"
 reset; RULES="POSTROUTING:tcp INPUT:tcp FORWARD:tcp" run
-n=$(count); [ "$n" = 0 ] && ok 'both WANs covered: no repeated repair; relay excluded' || no 'both WANs' 0 "$n"
+n=$(count); [ "$n" = 0 ] && ok 'both WANs covered: no repair for native VPN or relay' || no 'both WANs' 0 "$n"
 printf 'ENABLED=1\nDISABLE_IPV6=1\nWAN_IFACE=eth3\nNFQWS2_PORTS_TCP=443\nNFQWS2_TCP_PKT_OUT=9\nNFQWS2_TCP_PKT_IN=10\n' > "$CFG"
 mv "$BIN/iptables-original" "$BIN/iptables"
 reset; RULES="POSTROUTING:tcp INPUT:tcp FORWARD:tcp" run
