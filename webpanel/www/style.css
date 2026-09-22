@@ -2084,14 +2084,8 @@ pre.log {
   border: 1px solid var(--warn);
   background: var(--warn-alpha-soft);
 }
-/* Переходы в подписи баннера: час автообновления и история версий. Правило
-   ОДНО на обе — это соседи в одной строке, и разный пунктир под ними читался
-   бы как разный тип перехода. Теги при этом РАЗНЫЕ и намеренно: час уводит на
-   страницу «Режимы», это настоящая ссылка <a href="#/toggles">; история
-   открывается модалкой и никуда не ведёт, поэтому <button> — <a href="#">
-   соврал бы и мыши, и скринридеру. */
-.upd-au-link,
-.upd-history-link {
+/* Час автообновления ведёт к настройкам расписания. */
+.upd-au-link {
   background: transparent;
   border: 0;
   padding: 0;
@@ -2101,8 +2095,7 @@ pre.log {
   text-decoration: underline dashed;
   text-underline-offset: 3px;
 }
-.upd-au-link:hover,
-.upd-history-link:hover {
+.upd-au-link:hover {
   color: var(--text);
 }
 
@@ -2172,6 +2165,7 @@ pre.log {
 }
 .update-banner-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .update-banner-body {
@@ -2179,7 +2173,7 @@ pre.log {
   width: 100%;
   margin-top: 4px;
 }
-.upd-changelog[hidden] { display: none; }
+.update-banner-body[hidden] { display: none; }
 .upd-changelog {
   margin-top: 10px;
   padding-top: 10px;
@@ -2193,10 +2187,12 @@ pre.log {
 .upd-entry {
   display: flex;
   flex-direction: column;
+}
+.upd-history-list .upd-entry {
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
-.upd-entry:last-child {
+.upd-history-list .upd-entry:last-child {
   border-bottom: 0;
 }
 .upd-details {
