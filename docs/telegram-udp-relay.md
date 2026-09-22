@@ -32,12 +32,19 @@ NDM hook and watchdog restore the same rules under a shared directory lock. Setu
 families. Stop removes only this feature's rules/table. Existing TCP recovery
 flushes TCP conntrack entries only.
 
-A WSS outage keeps the route in place while reconnecting: selected packets
-are dropped, not accumulated or silently moved to another egress. A new WSS
-session creates new UDP associations. ICE recovery across that change is a
-Telegram client responsibility. Process exit removes the nonpersistent TUN;
-the supervisor/stop path cleans the rules. No keepalive daemon or second
-identity is introduced.
+After a detected WSS outage, the client revokes the ready marker and removes
+UDP routing before reconnecting. The normal router policy handles traffic
+until an authenticated UDP session is ready again; no stale TUN route owns it.
+A new WSS session creates new UDP associations. ICE recovery across that change
+is a Telegram client responsibility. Process exit removes the nonpersistent
+TUN; the supervisor/stop path also cleans the rules. No keepalive daemon or
+second identity is introduced.
+
+When the Telegram feature is enabled, Telegram-subnet UDP is excluded from
+NFQUEUE in both directions and address families. This is a negative IP-set
+predicate on the existing queue rules, not an ACCEPT that bypasses NDM policy.
+TCP and non-Telegram UDP retain existing zapret behavior. An explicit
+TG_PROXY_USER_DISABLED=1 restores the original queue selection on rebuild.
 
 IPv4 fragments and IPv6 extension/fragment headers are not reassembled.
 Supported UDP payloads are at most 1472 bytes for IPv4 and 1452 for IPv6;

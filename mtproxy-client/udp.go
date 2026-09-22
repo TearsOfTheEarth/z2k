@@ -143,8 +143,19 @@ func (tc *tunnelClient) runUDP() {
 		return
 	}
 	defer tun.Close()
-	defer os.Remove(udpReady)
-	defer func() { _ = udpRoute(context.Background(), "down") }()
+	tc.runUDPTransport(tun, udpReady, udpRoute, tc.dialUDP)
+}
+
+// The transport owns readiness and routing; privileged operations stay at its boundary.
+func (tc *tunnelClient) runUDPTransport(tun *os.File, readyPath string, route func(context.Context, string) error, dial func() (*websocket.Conn, error)) {
+	withdraw := func() {
+		// Revoke capability first: watchdog must not reinstall a dead route.
+		_ = os.Remove(readyPath)
+		if err := route(context.Background(), "down"); err != nil {
+			log.Printf("[udp] route cleanup: %v", err)
+		}
+	}
+	defer withdraw()
 	var mu sync.Mutex
 	var active *udpClientSession
 	go func() { <-tc.ctx.Done(); tun.Close() }()
@@ -170,14 +181,14 @@ func (tc *tunnelClient) runUDP() {
 	failures := 0
 	for tc.ctx.Err() == nil {
 		started := time.Now()
-		ws, err := tc.dialUDP()
+		ws, err := dial()
 		if err == nil {
 			s := newUDPClientSession()
 			mu.Lock()
 			active = s
 			mu.Unlock()
-			if err = os.WriteFile(udpReady, []byte("udp-v1\n"), 0600); err == nil {
-				err = udpRoute(tc.ctx, "ensure")
+			if err = os.WriteFile(readyPath, []byte("udp-v1\n"), 0600); err == nil {
+				err = route(tc.ctx, "ensure")
 			}
 			if err != nil {
 				log.Printf("[udp] route setup: %v", err)
@@ -190,6 +201,7 @@ func (tc *tunnelClient) runUDP() {
 			active = nil
 			mu.Unlock()
 			ws.Close()
+			withdraw()
 		} else if err != errNotRegistered {
 			log.Printf("[udp] connect: %v", err)
 		}
