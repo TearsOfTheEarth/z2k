@@ -56,3 +56,45 @@ checks and BusyBox isolated-file checks passed. After deployment, the actual
 router page loaded 182 domains, selected all, opened/cancelled both editors,
 and passed mobile-width and JavaScript-error checks. Before/after live whitelist
 files compare byte-for-byte. No live user entries were modified by the tests.
+
+## Additional domains: shared editor
+
+The same compact editor now powers “Доп. домены → Свои”. Both pages use
+`core/domain-list-editor.js`, including search, selection, bulk replacement,
+delete/clear confirmation, revision-guarded undo, and `.txt` import. Imports
+append to the current document and remove duplicates; invalid input rejects the
+entire candidate. Validation line numbers refer to the combined document.
+The installer explicitly delivers the new module. The automatically maintained
+autohostlist page retains its existing behavior.
+
+GET /extra-domains now also returns text and revision; POST /extra-domains/save
+uses the same atomic transaction and lock as legacy mutations. Newly added
+entries retain the old coverage check against other domain lists, including
+parent-domain matches in exclusions. Existing entries can still be retained or
+removed after another catalogue changes. A conflicting import is rejected as a
+whole and identifies the covering catalogue. Undo remains subject to current
+coverage rules. No user-supplied filesystem paths are accepted by the API.
+
+Additional verification:
+
+```sh
+sh tests/test_extra_domains_bulk.sh
+Z2K_TEST_EXTRA=1 PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs node tests/browser/whitelist.mjs
+```
+
+Both browser suites now exercise actual file uploads, deduplication, undo after
+import, and atomic rejection of malformed imports. Additional-domain tests also
+verify parent-domain coverage rejection and unchanged exclusions. Full local CI
+passed (the existing macOS BSD-sed skip remains); both browser suites passed.
+BusyBox checks on the router passed using temporary files only.
+
+Router preview backup: `/opt/z2k-extra-editor-backup-20260922/`. Deployment
+replaces actions.sh, api.sh and both page modules, and adds the common editor
+module. Both live lists are compared byte-for-byte with pre-deployment copies.
+No service restart or public release is required for this preview.
+
+Live verification after deployment passed on both routes: 26 additional domains
+and 182 exclusions loaded; selection and opening/cancelling editors worked;
+import controls were present; mobile layout had no horizontal overflow and no
+JavaScript errors occurred. Both live files still matched their backups after
+these read-only checks.

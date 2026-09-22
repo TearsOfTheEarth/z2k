@@ -7,14 +7,17 @@ python3 - <<'PY'
 import os,pathlib,subprocess,tempfile,concurrent.futures
 root=pathlib.Path(os.environ['ROOT'])
 with tempfile.TemporaryDirectory() as td:
- p=pathlib.Path(td)/'whitelist.txt'
- env=dict(os.environ,WHITELIST_FILE=str(p),LISTS_DIR=td)
+ extra=os.environ.get('Z2K_TEST_EXTRA')=='1'
+ p=pathlib.Path(td)/('extra-domains.txt' if extra else 'whitelist.txt')
+ prefix='extra_domains' if extra else 'whitelist'
+ env=dict(os.environ,WHITELIST_FILE=str(pathlib.Path(td)/'whitelist.txt'),EXTRA_DOMAINS_FILE=str(pathlib.Path(td)/'extra-domains.txt'),LISTS_DIR=td,ZAPRET2_DIR=td)
+ if extra:(pathlib.Path(td)/'whitelist.txt').write_text('excluded.example\n')
  def call(command,body=''):
   return subprocess.run(['sh','-c','. "$1"; '+command,'test',str(root/'webpanel/cgi/actions.sh')],input=body,text=True,capture_output=True,env=env)
- assert call('command -v whitelist_save').returncode==0, 'bulk save handler is missing'
+ assert call('command -v '+prefix+'_save').returncode==0, 'bulk save handler is missing'
  def rev():
-  r=call('whitelist_revision');assert r.returncode==0,r.stderr;return r.stdout.strip()
- def save(r,body):return call('whitelist_save "$0"'.replace('"$0"',"'"+r+"'"),body)
+  r=call(prefix+'_revision');assert r.returncode==0,r.stderr;return r.stdout.strip()
+ def save(r,body):return call((prefix+'_save "$0"').replace('"$0"',"'"+r+"'"),body)
  p.write_text('# keep comment\na.example\nb.example\n')
  old=p.read_text();r0=rev()
  r=save(r0,'# keep comment\n B.EXAMPLE \r\nb.example\nc.example\n')
@@ -38,5 +41,11 @@ with tempfile.TemporaryDirectory() as td:
  before=p.read_bytes();r4=rev()
  assert save(r4,'x'*1048577).returncode==2;assert p.read_bytes()==before
  assert not list(pathlib.Path(td).glob('*.z2k-lock')),'lock leaked'
+ if extra:
+  before=p.read_bytes()
+  for blocked in ['excluded.example','sub.excluded.example']:
+   assert save(rev(),blocked+'\n').returncode==2,'covered domain must be rejected'
+   assert p.read_bytes()==before
+  assert (pathlib.Path(td)/'whitelist.txt').read_text()=='excluded.example\n','whitelist must be untouched'
  print('PASS: atomic bulk save, normalization, validation, clear, undo, concurrent conflict, limits and permissions')
 PY

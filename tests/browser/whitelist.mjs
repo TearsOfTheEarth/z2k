@@ -4,16 +4,34 @@ import assert from 'node:assert/strict';
 const {chromium} = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const base = process.env.Z2K_PANEL_TEST_URL || 'http://127.0.0.1:18786';
 assert.equal(new URL(base).hostname,'127.0.0.1','fixture server must be local');
+const extra=process.env.Z2K_TEST_EXTRA==='1';
+const endpoint=extra ? '/extra-domains' : '/whitelist';
 const browser = await chromium.launch({channel:'chrome',headless:true});
 const page = await browser.newPage({viewport:{width:1280,height:1000}});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
-async function idle(){await page.locator('#wl-card[aria-busy="false"]').waitFor();}
-async function state(){return (await page.request.get(base+'/cgi-bin/api/whitelist',{headers:{'X-Z2K-Panel':'1'}})).json();}
-async function external(text){const s=await state();const r=await page.request.post(base+'/cgi-bin/api/whitelist/save?revision='+s.revision,{headers:{'X-Z2K-Panel':'1','Content-Type':'text/plain'},data:text});assert.equal(r.status(),200,await r.text());}
+async function idle(){await page.locator('#wl-card[aria-busy="false"]').waitFor({timeout:10000});}
+async function state(){return (await page.request.get(base+'/cgi-bin/api'+endpoint,{headers:{'X-Z2K-Panel':'1'}})).json();}
+async function external(text){const s=await state();const r=await page.request.post(base+'/cgi-bin/api'+endpoint+'/save?revision='+s.revision,{headers:{'X-Z2K-Panel':'1','Content-Type':'text/plain'},data:text});assert.equal(r.status(),200,await r.text());}
 try {
+ if(extra) {
+  const r=await page.request.get(base+'/cgi-bin/api/whitelist',{headers:{'X-Z2K-Panel':'1'}});const d=await r.json();
+  await page.request.post(base+'/cgi-bin/api/whitelist/save?revision='+d.revision,{headers:{'X-Z2K-Panel':'1'},data:'excluded.example\n'});
+ }
  await external('# my sites\na.example\nb.example\nc.example\nkeep.example\n');
- await page.goto(base+'/test');await idle();
+ await page.goto(base+(extra ? '/test-extra' : '/test'));await idle();
  assert.equal(await page.locator('[data-row]').count(),4);
+ await page.locator('#wl-import-file').setInputFiles({name:'domains.txt',mimeType:'text/plain',buffer:Buffer.from('imported.example\nIMPORTED.EXAMPLE\n')});await idle();
+ assert.deepEqual((await state()).domains,['a.example','b.example','c.example','keep.example','imported.example']);
+ await page.locator('#wl-undo').click();await idle();assert.equal((await state()).domains.length,4);
+ await page.locator('#wl-import-file').setInputFiles({name:'invalid.txt',mimeType:'text/plain',buffer:Buffer.from('good.example\nbad domain\n')});await idle();
+ assert.equal((await state()).domains.length,4);assert.match(await page.locator('#wl-error').textContent(),/строке 7/);
+ if(extra) {
+  await page.locator('#wl-import-file').setInputFiles({name:'covered.txt',mimeType:'text/plain',buffer:Buffer.from('sub.excluded.example\n')});await idle();
+  assert.equal((await state()).domains.length,4);assert.match(await page.locator('#wl-error').textContent(),/исключения/);
+  const r=await page.request.get(base+'/cgi-bin/api/whitelist',{headers:{'X-Z2K-Panel':'1'}});
+  assert.deepEqual((await r.json()).domains,['excluded.example'],'extra-domain edits must not modify exclusions');
+ }
+
  await page.locator('[data-row="1"]').click();
  await page.locator('[data-row="3"]').click({modifiers:['Shift']});
  assert.equal(await page.locator('[data-row]:checked').count(),3);

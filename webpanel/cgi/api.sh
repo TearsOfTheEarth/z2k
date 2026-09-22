@@ -235,7 +235,7 @@ panel_auth_gate
 # Крупные загрузки (списки, своя стратегия) идут через read_body_raw и свои
 # собственные потолки в мегабайтах — их это ограничение не касается.
 case "$PATH_INFO" in
-    /warp/list/save|/warp/devices/save|/whitelist/import|/strategy/pool/save|/strategy/pool/validate|/state/bulk|/whitelist/save) ;;
+    /warp/list/save|/warp/devices/save|/whitelist/import|/strategy/pool/save|/strategy/pool/validate|/state/bulk|/whitelist/save|/extra-domains/save) ;;
     *)
         if [ "${CONTENT_LENGTH:-0}" -gt "$Z2K_MAX_BODY" ] 2>/dev/null; then
             json_fail "413 Payload Too Large" "запрос слишком большой"
@@ -489,12 +489,13 @@ case "$method $path" in
         json_ok
         ;;
 
-    "GET /whitelist")
+    "GET /whitelist"|"GET /extra-domains")
+        case "$path" in /extra-domains) wl_file="$EXTRA_DOMAINS_FILE" ;; *) wl_file="$WHITELIST_FILE" ;; esac
         mkdir -p "$LISTS_DIR" || json_fail "500 Internal Server Error" "не удалось открыть список"
-        _list_lock "$WHITELIST_FILE" || json_fail "409 Conflict" "список занят, повторите"
-        wl_rev=$(whitelist_revision)
-        wl_text=$(cat "$WHITELIST_FILE" 2>/dev/null) || wl_text=""
-        _list_unlock "$WHITELIST_FILE"
+        _list_lock "$wl_file" || json_fail "409 Conflict" "список занят, повторите"
+        wl_rev=$(domain_list_revision "$wl_file")
+        wl_text=$(cat "$wl_file" 2>/dev/null) || wl_text=""
+        _list_unlock "$wl_file"
         [ -n "$wl_rev" ] || json_fail "500 Internal Server Error" "не удалось прочитать версию списка"
         json_header
         printf '{"ok":true,"revision":'
@@ -512,11 +513,12 @@ case "$method $path" in
         exit 0
         ;;
 
-    "POST /whitelist/save")
+    "POST /whitelist/save"|"POST /extra-domains/save")
+        case "$path" in /extra-domains/save) wl_save=extra_domains_save ;; *) wl_save=whitelist_save ;; esac
         [ "${CONTENT_LENGTH:-0}" -le 1048576 ] 2>/dev/null || json_fail "413 Payload Too Large" "список больше 1 МБ"
         wl_rev=$(form_value "${QUERY_STRING:-}" revision)
         wl_errfile=$(mktemp) || json_fail "500 Internal Server Error" "не удалось создать временный файл"
-        if wl_result=$(read_body_raw | whitelist_save "$wl_rev" 2>"$wl_errfile"); then
+        if wl_result=$(read_body_raw | "$wl_save" "$wl_rev" 2>"$wl_errfile"); then
             rm -f "$wl_errfile"
             json_header
             printf '{"ok":true,"revision":'
@@ -569,19 +571,6 @@ case "$method $path" in
         ;;
 
     # ---------- EXTRA DOMAINS (live hostlist для autocircular) ----------
-    "GET /extra-domains")
-        json_header
-        printf '{"ok":true,"domains":['
-        first=1
-        extra_domains_list | while IFS= read -r d; do
-            [ -z "$d" ] && continue
-            if [ "$first" = "1" ]; then first=0; else printf ','; fi
-            json_string "$d"
-        done
-        printf ']}\n'
-        exit 0
-        ;;
-
     "GET /autohostlist-domains")
         json_header
         printf '{"ok":true,"domains":['

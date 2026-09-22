@@ -3522,23 +3522,26 @@ uninstall_async() {
 
 # Compare-and-swap for whole whitelist edits. Existing add/import/delete share
 # this lock; a stale browser must never erase a later edit from another tab.
-whitelist_revision() {
-    if [ -f "$WHITELIST_FILE" ]; then
-        sha256sum "$WHITELIST_FILE" 2>/dev/null | cut -d' ' -f1
+domain_list_revision() {
+    local target="$1"
+    if [ -f "$target" ]; then
+        sha256sum "$target" 2>/dev/null | cut -d' ' -f1
     else
         printf '' | sha256sum | cut -d' ' -f1
     fi
 }
 
-whitelist_save() (
-    expected="$1"
+domain_list_save() (
+    target="$1"
+    expected="$2"
+    check_coverage="${3:-0}"
     case "$expected" in ''|*[!a-f0-9]*) echo 'Неизвестная версия списка. Обновите список.' >&2; exit 2 ;; esac
     [ "${#expected}" = 64 ] || exit 2
     mkdir -p "$LISTS_DIR" || exit 1
-    raw=$(mktemp "$WHITELIST_FILE.raw.XXXXXX") || exit 1
-    tmp=$(mktemp "$WHITELIST_FILE.edit.XXXXXX") || { rm -f "$raw"; exit 1; }
+    raw=$(mktemp "$target.raw.XXXXXX") || exit 1
+    tmp=$(mktemp "$target.edit.XXXXXX") || { rm -f "$raw"; exit 1; }
     locked=0
-    trap 'rm -f "$raw" "$tmp"; [ "$locked" = 0 ] || _list_unlock "$WHITELIST_FILE"' EXIT
+    trap 'rm -f "$raw" "$tmp"; [ "$locked" = 0 ] || _list_unlock "$target"' EXIT
     head -c 1048577 > "$raw" || exit 1
     [ "$(wc -c < "$raw")" -le 1048576 ] || { echo 'Список больше 1 МБ.' >&2; exit 2; }
     # Validate the entire candidate before touching the live file. Keep comments
@@ -3557,13 +3560,51 @@ whitelist_save() (
         }
         END {exit bad ? 2 : 0}
     ' "$raw" > "$tmp" || exit 2
-    _list_lock "$WHITELIST_FILE" || { echo 'Список занят. Повторите сохранение.' >&2; exit 1; }
+    _list_lock "$target" || { echo 'Список занят. Повторите сохранение.' >&2; exit 1; }
     locked=1
-    current=$(whitelist_revision)
+    current=$(domain_list_revision "$target")
     [ "$current" = "$expected" ] || {
         echo 'Список уже изменён в другой вкладке. Скопируйте свой текст и обновите список перед повторным сохранением.' >&2
         exit 3
     }
-    chmod 644 "$tmp" && mv -f "$tmp" "$WHITELIST_FILE" || { echo 'Не удалось сохранить список.' >&2; exit 1; }
-    whitelist_revision
+    if [ "$check_coverage" = 1 ]; then
+        _extra_domains_validate_file "$tmp" "$target" || exit 2
+    fi
+    chmod 644 "$tmp" && mv -f "$tmp" "$target" || { echo 'Не удалось сохранить список.' >&2; exit 1; }
+    domain_list_revision "$target"
 )
+
+whitelist_revision() { domain_list_revision "$WHITELIST_FILE"; }
+whitelist_save() { domain_list_save "$WHITELIST_FILE" "$1"; }
+extra_domains_revision() { domain_list_revision "$EXTRA_DOMAINS_FILE"; }
+extra_domains_save() { domain_list_save "$EXTRA_DOMAINS_FILE" "$1" 1; }
+
+# Check only newly added records; retaining/removing an existing record remains
+# possible after other lists have changed. Read each large catalogue once, not
+# once per imported domain. The target list lock is already held by the caller.
+_extra_domains_validate_file() {
+    local candidate="$1" old="$2" label path
+    [ -f "$old" ] || old=/dev/null
+    while IFS='|' read -r label path; do
+        [ -s "$path" ] || continue
+        LC_ALL=C awk -v old="$old" -v covered="$path" -v label="$label" '
+            { sub(/\r$/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); $0=tolower($0) }
+            FILENAME==old {previous[$0]=1; next}
+            FILENAME==covered {if($0!="" && $0 !~ /^#/) have[$0]=1; next}
+            $0=="" || $0 ~ /^#/ || previous[$0] {next}
+            {
+                domain=$0; suffix=domain
+                while(index(suffix,".")) {
+                    if(have[suffix]) {
+                        printf "Домен %s уже покрыт записью %s в списке «%s». Список не изменён.\n", domain,suffix,label > "/dev/stderr"
+                        exit 2
+                    }
+                    sub(/^[^.]+\./,"",suffix)
+                }
+            }
+        ' "$old" "$path" "$candidate" || return 2
+    done <<CATALOG
+$(_domain_lists_catalog)
+CATALOG
+    return 0
+}

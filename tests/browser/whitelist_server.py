@@ -7,8 +7,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
  def __init__(self,*a,**kw):super().__init__(*a,directory=str(ROOT/'webpanel/www'),**kw)
  def do_GET(self):
   if self.path.startswith('/cgi-bin/api'):return self.api()
-  if self.path=='/test':
+  if self.path in ('/test','/test-extra'):
    b=b'''<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"><main id="app" style="max-width:1040px;margin:24px auto;padding:0 16px"></main><div id="toast-stack"></div><script type="module">import {renderExcludeDomains} from '/js/pages/exclude.js';renderExcludeDomains();</script>'''
+   if self.path=='/test-extra':b=b.replace(b'renderExcludeDomains',b'renderExtraDomains').replace(b'/js/pages/exclude.js',b'/js/pages/extra-domains.js')
    self.send_response(200);self.send_header('Content-Type','text/html');self.end_headers();self.wfile.write(b);return
   super().do_GET()
  def do_POST(self):self.api()
