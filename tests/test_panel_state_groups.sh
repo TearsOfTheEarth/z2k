@@ -117,7 +117,16 @@ function mkEl(key) {
       toggle(c, on) { if (on === undefined ? !cls.has(c) : on) cls.add(c); else cls.delete(c); },
       contains(c) { return cls.has(c); },
     },
-    set innerHTML(v) { this._h = String(v); }, get innerHTML() { return this._h; },
+    // Перерисовка УНИЧТОЖАЕТ потомков вместе с их обработчиками — в браузере
+    // старые узлы просто исчезают. Заглушка же раздаёт один и тот же объект
+    // на каждый запрос селектора и без этой строки копила подписки: после
+    // трёх отрисовок один клик звал три обработчика, переключатель щёлкал
+    // трижды, и проверка зеленела по чётности, а не по делу.
+    set innerHTML(v) {
+      for (const [k, el] of REG) if (k.startsWith(this._sel + ">")) el.listeners = {};
+      this._h = String(v);
+    },
+    get innerHTML() { return this._h; },
     set textContent(v) { this._h = String(v); }, get textContent() { return this._h; },
     addEventListener(t, fn) { (this.listeners[t] = this.listeners[t] || []).push(fn); },
     removeEventListener() {}, appendChild() {}, removeChild() {}, remove() {},
