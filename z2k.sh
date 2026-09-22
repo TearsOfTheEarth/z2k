@@ -109,7 +109,7 @@ _z2k_vps_gh_resolve() {
 }
 
 # Список модулей для загрузки
-MODULES="utils install strategies config config_official webpanel menu auto_update"
+MODULES="utils install strategies config config_official webpanel menu auto_update wan"
 
 # ==============================================================================
 # ВСТРОЕННЫЕ FALLBACK ФУНКЦИИ

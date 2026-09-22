@@ -1311,31 +1311,18 @@ z2k_seed_user_exclusions()
 # KEENETIC FIREWALL FUNCTIONS (замена OpenWrt network.sh зависимостей)
 # ==============================================================================
 
+# Shared with the self-healer so secondary policy WANs receive the same rules.
+# shellcheck source=lib/wan.sh
+. "$ZAPRET_BASE/lib/wan.sh"
+
 get_default_ifaces4()
 {
-	exists ip || return 0
-	# BusyBox `ip` IGNORES the `default` selector and prints the WHOLE routing
-	# table, so the filtering has to happen HERE. Without it every LAN subnet
-	# route contributed its device: on a live Keenetic this returned
-	# "br0 br1 ppp0" instead of "ppp0", which put NFQUEUE rules on both LAN
-	# bridges (3x the rules) and queued LAN-to-LAN traffic into nfqws2 for
-	# nothing. Verified on the box: `ip route show default` printed
-	# "192.168.1.0/24 dev br0" and "10.1.30.0/24 dev br1" alongside the real
-	# default. iproute2 honours the selector, so this is a no-op there.
-	ip route show default 2>/dev/null | awk '
-		$1!="default" && $1!="0.0.0.0/0" { next }
-		{ for (i=1;i<=NF;i++) if ($i=="dev") print $(i+1) }
-	' | xargs
+	z2k_wan_ifaces -4
 }
 
 get_default_ifaces6()
 {
-	exists ip || return 0
-	# Same BusyBox selector bug as get_default_ifaces4 - filter here.
-	ip -6 route show default 2>/dev/null | awk '
-		$1!="default" && $1!="::/0" { next }
-		{ for (i=1;i<=NF;i++) if ($i=="dev") print $(i+1) }
-	' | xargs
+	z2k_wan_ifaces -6
 }
 
 get_wan_ifaces4()
@@ -1351,7 +1338,7 @@ get_wan_ifaces4()
 		local i
 		for i in $ifaces; do
 			# /sys (не netlink) — `ip link show` виснет в D-state на WireGuard nwg0 под штормом (issue #18)
-			[ -e "/sys/class/net/$i" ] || echo "WARN: WAN iface '$i' not found"
+			[ -e "/sys/class/net/$i" ] || echo "WARN: WAN iface '$i' not found" >&2
 		done
 	fi
 	[ -n "$ifaces" ] && unique $ifaces || true
@@ -1370,7 +1357,7 @@ get_wan_ifaces6()
 		local i
 		for i in $ifaces; do
 			# /sys (не netlink) — `ip link show` виснет в D-state на WireGuard nwg0 под штормом (issue #18)
-			[ -e "/sys/class/net/$i" ] || echo "WARN: WAN iface '$i' not found"
+			[ -e "/sys/class/net/$i" ] || echo "WARN: WAN iface '$i' not found" >&2
 		done
 	fi
 	[ -n "$ifaces" ] && unique $ifaces || true
