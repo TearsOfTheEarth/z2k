@@ -229,4 +229,110 @@ H.test('generated QUIC profile persists a timer rotation without another packet'
     H.eq(2,h.nstrategy)
     H.eq(2,disk_strategy('quic','googlevideo.com|4'))
 end)
+
+-- Family hints only share a starting strategy, never a host record.
+local function yt_success(host, family)
+    local d=profile_initial('yt_tcp',host)
+    if family==6 then d.dis.ip=nil; d.dis.ip6={} end
+    local h=H.step(d); h.nstrategy=2
+    d=profile_initial('yt_tcp',host)
+    if family==6 then d.dis.ip=nil; d.dis.ip6={} end
+    H.step(d)
+    local reply=H.tcp(d.track,false,1,H.hello,'tls_server_hello'); reply.arg=d.arg
+    if family==6 then reply.dis.ip=nil; reply.dis.ip6={} end
+    H.step(reply)
+    reply=H.tcp(d.track,false,4200,'new content'); reply.arg=d.arg
+    if family==6 then reply.dis.ip=nil; reply.dis.ip6={} end
+    H.step(reply)
+    return h,d
+end
+H.test('YouTube new sibling starts with confirmed strategy and retains its own record',function()
+    fresh_state()
+    local donor=yt_success('www.youtube.com')
+    donor.failure_counter=2
+    local h=H.step(profile_initial('yt_tcp','m.youtube.com'))
+    H.eq(2,h.nstrategy); H.eq(2,H.executed); H.eq(nil,h.final)
+    assert(h~=donor); H.eq(nil,h.failure_counter)
+    yt_success('music.youtube.com'); H.eq(2,donor.failure_counter)
+end)
+H.test('YouTube outgoing candidates do not teach siblings',function()
+    fresh_state()
+    local h=H.step(profile_initial('yt_tcp','www.youtube.com')); h.nstrategy=2
+    H.step(profile_initial('yt_tcp','www.youtube.com'))
+    H.eq(1,H.step(profile_initial('yt_tcp','m.youtube.com')).nstrategy)
+end)
+H.test('YouTube hints respect saved state including explicit default and pins',function()
+    fresh_state(); yt_success('www.youtube.com')
+    for _,mode in ipairs({'auto','frozen'}) do
+        local host=mode..'.youtube.com'
+        H.advance(3); P.flush()
+        local f=assert(io.open(state_path,'a')); f:write('yt_tcp\t'..host..'|4\t1\t1000\t'..mode..'\n'); f:close()
+        local h=H.step(profile_initial('yt_tcp',host))
+        H.eq(1,h.nstrategy); H.eq(mode=='frozen' and 1 or nil,h.final)
+    end
+end)
+H.test('YouTube hints keep other services protocols and families independent',function()
+    fresh_state(); yt_success('www.youtube.com')
+    for _,host in ipairs({'youtube.com.evil.org','notyoutube.com','i.ytimg.com','youtubei.googleapis.com'}) do
+        H.eq(1,H.step(profile_initial('yt_tcp',host)).nstrategy)
+    end
+    H.eq(1,H.step(profile_initial('quic','m.youtube.com')).nstrategy)
+    local d=profile_initial('yt_tcp','m.youtube.com'); d.dis.ip=nil; d.dis.ip6={}
+    H.eq(1,H.step(d).nstrategy)
+    yt_success('www.youtube.com',6)
+    d=profile_initial('yt_tcp','music.youtube.com'); d.dis.ip=nil; d.dis.ip6={}
+    H.eq(2,H.step(d).nstrategy)
+end)
+H.test('YouTube expired or rotated donor is not inherited',function()
+    fresh_state(); yt_success('www.youtube.com'); H.advance(301)
+    H.eq(1,H.step(profile_initial('yt_tcp','m.youtube.com')).nstrategy)
+    local h=yt_success('www.youtube.com'); circular_rotate(h)
+    H.eq(1,H.step(profile_initial('yt_tcp','music.youtube.com')).nstrategy)
+end)
+H.test('YouTube established sibling is not reseeded after its own rotation',function()
+    fresh_state(); yt_success('www.youtube.com')
+    local h=H.step(profile_initial('yt_tcp','m.youtube.com')); H.eq(2,h.nstrategy)
+    circular_rotate(h); H.eq(3,h.nstrategy)
+    H.step(profile_initial('yt_tcp','m.youtube.com')); H.eq(3,h.nstrategy)
+end)
+
+
+H.test('YouTube sibling failures rotate only that sibling and cannot reseed it',function()
+    fresh_state(); local donor=yt_success('www.youtube.com')
+    local h
+    for i=1,3 do
+        local d=profile_initial('yt_tcp','m.youtube.com')
+        local c; h,c=H.step(d)
+        circular_report_failure(h,c,d.arg)
+    end
+    H.eq(3,h.nstrategy); H.eq(2,donor.nstrategy)
+    H.step(profile_initial('yt_tcp','m.youtube.com')); H.eq(3,h.nstrategy)
+end)
+H.test('YouTube late success from an abandoned strategy cannot teach new hosts',function()
+    fresh_state()
+    local d=profile_initial('yt_tcp','www.youtube.com'); local h=H.step(d)
+    circular_rotate(h)
+    local reply=H.tcp(d.track,false,1,H.hello,'tls_server_hello'); reply.arg=d.arg; H.step(reply)
+    reply=H.tcp(d.track,false,4200,'new content'); reply.arg=d.arg; H.step(reply)
+    H.eq(1,H.step(profile_initial('yt_tcp','m.youtube.com')).nstrategy)
+end)
+H.test('YouTube restart keeps per-host selections but discards unproven family hints',function()
+    fresh_state(); yt_success('www.youtube.com'); P.flush(); P._reset(); autostate={}
+    H.eq(2,H.step(profile_initial('yt_tcp','www.youtube.com')).nstrategy)
+    H.eq(1,H.step(profile_initial('yt_tcp','m.youtube.com')).nstrategy)
+end)
+
+
+H.test('YouTube neutral rejection and manual freeze do not claim a confirmed success',function()
+    fresh_state()
+    local d=profile_initial('yt_tcp','www.youtube.com'); local h=H.step(d); h.nstrategy=2
+    d=profile_initial('yt_tcp','www.youtube.com'); H.step(d)
+    local r=H.tcp(d.track,false,1,H.alert,'tls_alert'); r.arg=d.arg; H.step(r)
+    H.eq(1,H.step(profile_initial('yt_tcp','m.youtube.com')).nstrategy)
+    fresh_state(); autostate={}
+    local f=assert(io.open(state_path,'w')); f:write('yt_tcp\twww.youtube.com|4\t2\t1000\tfrozen\n'); f:close()
+    H.step(profile_initial('yt_tcp','www.youtube.com'))
+    H.eq(1,H.step(profile_initial('yt_tcp','m.youtube.com')).nstrategy)
+end)
+
 H.finish()
