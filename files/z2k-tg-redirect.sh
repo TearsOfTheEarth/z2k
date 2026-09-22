@@ -176,7 +176,7 @@ z2k_tg_flush_conntrack() {
     done
 }
 
-# UDP voice is opt-in. Only LAN bridges and Telegram destinations are routed;
+# UDP voice: only unmarked LAN traffic and Telegram destinations are routed;
 # P2P, discovery at third-party STUN services and router-originated UDP stay direct.
 Z2K_TG_UDP_IF=z2ktg0
 Z2K_TG_UDP_MARK=0x8000000
@@ -184,12 +184,41 @@ Z2K_TG_UDP_TABLE=988
 Z2K_TG_UDP_PREF=89
 Z2K_TG_UDP_READY=/tmp/z2k-log/tg-udp.ready
 
+# Delete only our old rule, including duplicate copies; never delete a rule
+# merely by priority (another service may use the same priority).
+_z2k_tg_udp_remove_legacy_policy() {
+    while ip "$1" rule del pref "$Z2K_TG_UDP_PREF" fwmark "$Z2K_TG_UDP_MARK/$Z2K_TG_UDP_MARK" table "$Z2K_TG_UDP_TABLE" 2>/dev/null; do :; done
+}
+
 _z2k_tg_udp_family_up() {
-    local fam="$1" set="$2" cmd="$3"
-    ip "$fam" route replace default dev "$Z2K_TG_UDP_IF" table "$Z2K_TG_UDP_TABLE" || return 1
-    ip "$fam" rule show | grep -q "fwmark $Z2K_TG_UDP_MARK.*lookup $Z2K_TG_UDP_TABLE" || \
-        ip "$fam" rule add pref "$Z2K_TG_UDP_PREF" fwmark "$Z2K_TG_UDP_MARK/$Z2K_TG_UDP_MARK" table "$Z2K_TG_UDP_TABLE" || return 1
+    local fam="$1" set="$2" cmd="$3" cidrs cidr
+    # p-85.6 used a single-bit match also satisfied by Keenetic policy marks
+    # (e.g. 0x0ffffaaa). Its default route then stole ALL policy traffic.
+    # Replace that default with fall-through BEFORE adding any selector.
+    ip "$fam" route replace throw default table "$Z2K_TG_UDP_TABLE" || return 1
+    case "$fam" in -4) cidrs="$Z2K_TG_CIDRS" ;; -6) cidrs="$Z2K_TG_CIDRS6" ;; *) return 1 ;; esac
+    for cidr in $cidrs; do
+        ip "$fam" route replace "$cidr" dev "$Z2K_TG_UDP_IF" table "$Z2K_TG_UDP_TABLE" || return 1
+    done
+    # Full-word equality is essential: do not interpret an NDM policy bit as
+    # our tag. iproute2 may print a full mask explicitly or omit it.
+    ip "$fam" rule show | awk -v pref="$Z2K_TG_UDP_PREF:" -v mark="$Z2K_TG_UDP_MARK" -v tab="$Z2K_TG_UDP_TABLE" '
+        $1==pref {
+            exact=0; target=0
+            for(i=2;i<NF;i++) {
+                if($i=="fwmark" && ($(i+1)==mark || $(i+1)==mark "/0xffffffff")) exact=1
+                if($i=="lookup" && $(i+1)==tab) target=1
+            }
+            if(exact && target) found=1
+        }
+        END {exit !found}
+    ' || ip "$fam" rule add pref "$Z2K_TG_UDP_PREF" fwmark "$Z2K_TG_UDP_MARK/0xffffffff" table "$Z2K_TG_UDP_TABLE" || return 1
+    _z2k_tg_udp_remove_legacy_policy "$fam"
     "$cmd" -t mangle -N Z2K_TG_UDP 2>/dev/null || true
+    # Explicit routing policies and marks from other tools retain ownership.
+    # Insert before the old MARK/ACCEPT pair when upgrading a live chain.
+    "$cmd" -t mangle -C Z2K_TG_UDP -m mark ! --mark 0x0/0xffffffff -j RETURN || \
+        "$cmd" -t mangle -I Z2K_TG_UDP 1 -m mark ! --mark 0x0/0xffffffff -j RETURN || return 1
     "$cmd" -t mangle -C Z2K_TG_UDP -j MARK --set-xmark "$Z2K_TG_UDP_MARK/$Z2K_TG_UDP_MARK" || \
         "$cmd" -t mangle -A Z2K_TG_UDP -j MARK --set-xmark "$Z2K_TG_UDP_MARK/$Z2K_TG_UDP_MARK" || return 1
     "$cmd" -t mangle -C Z2K_TG_UDP -j ACCEPT || "$cmd" -t mangle -A Z2K_TG_UDP -j ACCEPT || return 1
@@ -241,7 +270,8 @@ _z2k_tg_udp_family_down() {
     done
     "$cmd" -t mangle -F Z2K_TG_UDP
     "$cmd" -t mangle -X Z2K_TG_UDP
-    ip "$fam" rule del pref "$Z2K_TG_UDP_PREF" fwmark "$Z2K_TG_UDP_MARK/$Z2K_TG_UDP_MARK" table "$Z2K_TG_UDP_TABLE" 2>/dev/null || true
+    while ip "$fam" rule del pref "$Z2K_TG_UDP_PREF" fwmark "$Z2K_TG_UDP_MARK/0xffffffff" table "$Z2K_TG_UDP_TABLE" 2>/dev/null; do :; done
+    _z2k_tg_udp_remove_legacy_policy "$fam"
     ip "$fam" route flush table "$Z2K_TG_UDP_TABLE" 2>/dev/null || true
 }
 _z2k_tg_udp_down_unlocked() {
