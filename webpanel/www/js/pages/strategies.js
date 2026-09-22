@@ -90,8 +90,8 @@ export function strategiesShell(activeId, bodyHtml) {
 // объясняет, и таблица врала бы умолчанием.
 export async function renderState() {
   $app.innerHTML = strategiesShell("live", `
-    <div class="card">
-      <h3>Discord, голосовые каналы</h3>
+    <details class="card state-voice">
+      <summary>Discord: голосовые каналы <span id="discord-voice-status">Загрузка…</span></summary>
       <p class="desc">
         Голосовой пул Discord не привязан к домену, поэтому в таблице ниже его
         нет: там показано то, что уже происходило, а здесь стратегию можно
@@ -99,9 +99,10 @@ export async function renderState() {
         не менялась.
       </p>
       <div class="btn-row" id="discord-voice-controls">${skeletonLines(1)}</div>
-    </div>
+    </details>
     <div class="card">
-      <h3>Выбранные стратегии по доменам</h3>
+      <h3>Стратегии по доменам</h3>
+      <details class="state-help"><summary>Как управлять?</summary>
       <p class="desc">
         Для каждого домена z2k запоминает стратегию, которая на нём заработала.
         В каждой строке:
@@ -120,12 +121,21 @@ export async function renderState() {
         Пул, которому вы задали <a href="#/strategies">свою стратегию</a>, здесь
         не появится: подбор для него выключен, а работает ровно ваша строка.
       </p>
-      <div class="btn-row state-tools" style="margin-bottom:10px">
-        <button class="btn" id="state-refresh">Обновить</button>
-        <button class="btn btn-danger" id="state-clear-all">Удалить все записи</button>
+      </details>
+      <label class="state-search-label" for="state-search">Поиск по домену</label>
+      <div class="state-search-wrap">
         <input id="state-search" class="state-search" type="search"
           placeholder="Домен или часть домена" aria-label="Поиск по домену"
           autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button type="button" class="state-search-clear" id="state-search-clear"
+          aria-label="Очистить поиск" hidden>×</button>
+      </div>
+      <div class="state-tools">
+        <span id="state-search-count" role="status" aria-live="polite">Загрузка записей…</span>
+        <div class="btn-row">
+          <button class="btn" id="state-refresh">Обновить</button>
+          <button class="btn btn-danger" id="state-clear-all">Удалить все записи</button>
+        </div>
       </div>
       <div id="state-body">${skeletonLines(6)}</div>
     </div>
@@ -139,9 +149,18 @@ export async function renderState() {
   // поэтому идём через resortState (кэш), а не через loadState() с сетью.
   // На роутере /state стоит секунды, и ходить туда на каждую букву значило бы
   // сделать поле непригодным ровно там, где оно нужнее всего.
-  // Передавать resortState напрямую безопасно: аргументы он игнорирует, и
-  // Event не попадает в useCache — та же ловушка, что описана выше у «Обновить».
-  document.getElementById("state-search").addEventListener("input", resortState);
+  const search = document.getElementById("state-search");
+  const clear = document.getElementById("state-search-clear");
+  search.addEventListener("input", () => {
+    clear.hidden = !search.value;
+    resortState();
+  });
+  clear.addEventListener("click", () => {
+    search.value = "";
+    clear.hidden = true;
+    search.focus();
+    resortState();
+  });
   loadState();
 }
 
@@ -161,6 +180,10 @@ function renderDiscordVoicePanel(entries) {
   const status = dEntry
     ? `сейчас: №${dCur}${dFrozen ? " 🔒 заморожено" : ""}`
     : (poolN ? `пул из ${poolN} стратегий; запись появится после «Применить»` : `пул недоступен (nfqws2 не запущен?)`);
+  const summary = document.getElementById("discord-voice-status");
+  if (summary) summary.textContent = dEntry
+    ? `Стратегия ${dCur}${dFrozen ? " · заморожена" : ""}`
+    : (poolN ? "Автоподбор" : "Пул недоступен");
   dc.innerHTML = `
     <select id="dv-strat">${opts}</select>
     <label style="display:inline-flex;align-items:center;gap:6px;margin:0 6px">
@@ -284,7 +307,9 @@ async function loadState(useCache) {
     };
     const all = entries.filter(e => e.host !== "nohost");
 
+    const counter = document.getElementById("state-search-count");
     if (!all.length) {
+      if (counter) counter.textContent = "Записей: 0";
       body.innerHTML = `<p style="color:var(--text-muted)">пока пусто — ни одна стратегия ещё не закреплена</p>`;
       return;
     }
@@ -305,6 +330,9 @@ async function loadState(useCache) {
     const visible = query
       ? all.filter(e => splitFamily(e.host).name.toLowerCase().includes(query))
       : all;
+    if (counter) counter.textContent = query
+      ? `Найдено записей: ${visible.length} из ${all.length}`
+      : `Записей: ${all.length}`;
     // Поле очистили — сессия поиска кончилась, ручные сворачивания внутри неё
     // забываются, и таблица возвращается к тому, что помнит stateOpenGroups.
     if (!query) searchCollapsed = new Set();
@@ -651,6 +679,8 @@ async function loadState(useCache) {
     // await», но гейта не видит; то же подавление стоит и на записи кэша.
     // eslint-disable-next-line require-atomic-updates
     stateCache = null;
+    const counter = document.getElementById("state-search-count");
+    if (counter) counter.textContent = "Не удалось загрузить записи";
     body.innerHTML = `<p style="color:var(--bad)">${errHtml(e)}</p>`;
   }
 }
