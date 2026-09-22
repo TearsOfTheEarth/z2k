@@ -5,6 +5,24 @@ import { _newLoad, _stale } from "../core/loadorder.js";
 import { toast } from "../core/toast.js";
 import { STATE_SORT_LABELS, groupDomain, saveOpenGroups, saveStateSort, setStatePools, stateOpenGroups, statePools, stateSort } from "../state-model.js";
 
+// Разделитель СОСТАВНОГО ключа группы («пул<sep>домен»).
+//
+// НЕ U+0000, хотя для сортировочных ключей ниже он как раз хорош. Этот ключ
+// уезжает в data-group и читается обратно из DOM, а разбор HTML заменяет
+// U+0000 на U+FFFD — это не причуда движка, а прямое требование стандарта
+// (attribute value state: unexpected-null-character → U+FFFD). Проверено на
+// parse5: записали «quic\u0000discord.media», прочитали
+// «quic�discord.media».
+//
+// Ключ переставал совпадать сам с собой, и память о раскрытии групп не
+// работала вовсе: клик сохранял вариант с U+FFFD, а следующая отрисовка
+// спрашивала про вариант с U+0000 и получала «нет». Заметить это в тестах
+// было нельзя — заглушка DOM присваивает dataset.group руками, минуя разбор.
+//
+// Вертикальная черта безопасна: ключ пула — [a-z_0-9], а имя группы здесь уже
+// без суффикса семейства, который эту черту и содержит.
+const GKEY_SEP = "|";
+
 //
 // Раньше это были два соседних пункта меню — «Стратегии» и «Rotator» — и люди
 // не понимали, где заводить свою стратегию. По делу это одна сущность на двух
@@ -167,14 +185,31 @@ function renderDiscordVoicePanel(entries) {
 // explicit «Обновить» button, and after an edit or delete.
 let stateCache = null;
 
+// Группы, свёрнутые ВРУЧНУЮ во время поиска. Отдельно от stateOpenGroups и
+// намеренно не в localStorage: тот набор переживает перезагрузку страницы, и
+// снимать в нём флаг из-за одной отфильтрованной выдачи нельзя — человек
+// потерял бы раскрытие, поставленное задолго до поиска. Набор живёт, пока в
+// поле поиска что-то есть, и очищается вместе с ним.
+let searchCollapsed = new Set();
+
 // Запрос, который ещё в полёте. Новый вызов его отменяет: /state стоит
 // ~2.4 с шелл-CGI на роутере, и два параллельных прогона соревнуются за
 // тот же CPU ради ответа, который всё равно будет отброшен.
 let _stateAbort = null;
 
-// Re-render with the rows already in hand. Falls back to a real load if the
-// cache is empty (first paint, or an error cleared it).
-function resortState() { return loadState(true); }
+// Перерисовка тем, что уже в руках. Пустой кэш значит, что первая загрузка
+// ещё идёт или её оборвала ошибка — и в сеть отсюда НЕ идём.
+//
+// Раньше здесь был безусловный loadState(true), который при пустом кэше
+// молча проваливался в сетевую ветку. С сортировкой это сходило с рук: по
+// колонке кликают, когда таблица уже нарисована. Поле поиска доступно сразу,
+// и каждая буква, набранная до прихода первого /state, отменяла летящий
+// запрос и пускала новый — а он на роутере стоит ~2.4 с шелл-CGI, так что
+// таблица оставалась скелетом всю очередь нажатий.
+//
+// Терять при этом нечего: и запрос, и сортировка читаются в МОМЕНТ
+// отрисовки, поэтому пришедший ответ нарисуется уже отфильтрованным.
+function resortState() { return stateCache ? loadState(true) : Promise.resolve(); }
 
 async function loadState(useCache) {
   const body = document.getElementById("state-body");
@@ -216,7 +251,14 @@ async function loadState(useCache) {
     }
 
     // Discord-voice panel first — it must populate even with empty rotator state.
-    renderDiscordVoicePanel(entries);
+    //
+    // Только на СЕТЕВОЙ загрузке. Перерисовка по кэшу (поиск, сортировка)
+    // данных этой карточки не меняет — они те же entries и те же пулы, — а
+    // перерисовка сбрасывает выбор в её селекторе и галочку «заморозить»,
+    // которые человек выставил, но ещё не применил. С сортировкой это было
+    // терпимо: по колонке кликают редко и осознанно. Поиск дёргает
+    // перерисовку на КАЖДУЮ букву, то есть стирал бы выбор сразу.
+    if (!useCache) renderDiscordVoicePanel(entries);
 
     // Записи с host="nohost" — это пулы без домена, и единственный такой пул,
     // discord_udp, уже показан карточкой выше со своим селектором и заморозкой.
@@ -263,6 +305,9 @@ async function loadState(useCache) {
     const visible = query
       ? all.filter(e => splitFamily(e.host).name.toLowerCase().includes(query))
       : all;
+    // Поле очистили — сессия поиска кончилась, ручные сворачивания внутри неё
+    // забываются, и таблица возвращается к тому, что помнит stateOpenGroups.
+    if (!query) searchCollapsed = new Set();
 
     if (!visible.length) {
       body.innerHTML = `<p style="color:var(--text-muted)">Ничего не найдено. Измените поисковый запрос.</p>`;
@@ -282,7 +327,7 @@ async function loadState(useCache) {
       const hf = splitFamily(e.host);
       const dom = groupDomain(hf.name);
       return [e, { name: hf.name, fam: hf.fam, group: dom,
-                   gkey: String(e.key || "") + "\u0000" + dom }];
+                   gkey: String(e.key || "") + GKEY_SEP + dom }];
     }));
     // Sort a shallow copy — never mutate the cached server response.
     const sorted = visible.slice().sort((a, b) => {
@@ -416,7 +461,11 @@ async function loadState(useCache) {
       // в stateOpenGroups НЕ пишется — он переживает перезагрузку страницы, и
       // одна отфильтрованная выдача оставила бы после себя навсегда
       // развёрнутыми полтысячи строк.
-      const open = query ? true : stateOpenGroups.has(b.gkey);
+      // Раскрыты не НАСИЛЬНО: свёрнутое руками прямо сейчас уважается, иначе
+      // следующая же буква (и любая перерисовка после заморозки или удаления)
+      // возвращала бы группу раскрытой, и свернуть её было бы нельзя вовсе.
+      // Оба набора идут мимо stateOpenGroups — см. searchCollapsed.
+      const open = query ? !searchCollapsed.has(b.gkey) : stateOpenGroups.has(b.gkey);
       const n = b.rows.length;
       const keys = [b.pool];
       const nFrozen = b.rows.filter(e => e.mode === "frozen").length;
@@ -426,13 +475,19 @@ async function loadState(useCache) {
       const groupFrozen = nFrozen === n && n > 0;
       const freshest = Math.min(...b.rows.map(e => nowSec - Number(e.ts || 0)));
       const countText = `${n} ${plural(n, "запись", "записи", "записей")}`;
+      // ВО ВРЕМЯ ПОИСКА В ГРУППЕ ВИДНЫ ТОЛЬКО СОВПАВШИЕ СТРОКИ, и пакетные
+      // кнопки действуют ровно на них — они забирают строки из нарисованного
+      // tbody. Значит слова обязаны это признавать: «вся группа» над тремя
+      // строками из ста — неправда, а кнопка рядом необратима. Сужаем не
+      // действие (сужать его незачем: человек видит, что жмёт), а подпись.
+      const whole = !query;
       return `
         <tbody class="sg${open ? "" : " sg-closed"}" data-group="${escapeHtml(b.gkey)}">
           <tr class="sg-head">
             <td data-label="" class="sg-lead">
               <button class="btn btn-danger btn-icon sg-reset"
-                      title="Сбросить подбор для всей группы (${escapeHtml(String(n))} ${escapeHtml(plural(n, "записи", "записей", "записей"))})"
-                      aria-label="Сбросить подбор для группы ${escapeHtml(b.group)}"
+                      title="Сбросить подбор ${whole ? "для всей группы" : "для найденных в группе"} (${escapeHtml(String(n))} ${escapeHtml(plural(n, "записи", "записей", "записей"))})"
+                      aria-label="Сбросить подбор ${whole ? "для группы" : "для найденных в группе"} ${escapeHtml(b.group)}"
                       data-gkey="${escapeHtml(b.gkey)}">${_icons.close}</button>
             </td>
             <td data-label="Профиль">${escapeHtml(keys.join(", "))}</td>
@@ -450,10 +505,12 @@ async function loadState(useCache) {
                       data-frozen="${groupFrozen ? "1" : "0"}"
                       style="color:${nFrozen ? "var(--accent)" : "var(--text-muted)"}"
                       title="${groupFrozen
-                        ? "Вся группа заморожена — нажмите, чтобы вернуть авторотацию"
-                        : "Заморозить всю группу на текущих стратегиях"}">${groupFrozen ? _icons.lockClosed : _icons.lockOpen}</button>
+                        ? (whole ? "Вся группа заморожена — нажмите, чтобы вернуть авторотацию"
+                                 : "Все найденные заморожены — нажмите, чтобы вернуть авторотацию")
+                        : (whole ? "Заморозить всю группу на текущих стратегиях"
+                                 : "Заморозить найденные на текущих стратегиях")}">${groupFrozen ? _icons.lockClosed : _icons.lockOpen}</button>
               ${nFrozen
-                ? `<span class="sg-frozen">${nFrozen === n ? "все" : `${nFrozen} из ${n}`}</span>`
+                ? `<span class="sg-frozen">${nFrozen === n && whole ? "все" : `${nFrozen} из ${n}`}</span>`
                 : ""}</td>
             <td data-label="Возраст" class="state-age">${fmtAge(freshest)}</td>
           </tr>
@@ -545,8 +602,15 @@ async function loadState(useCache) {
         // Класс на tbody — единственный источник, который всегда совпадает
         // с тем, что человек видит.
         const open = tb.classList.contains("sg-closed");
-        if (open) stateOpenGroups.add(g); else stateOpenGroups.delete(g);
-        saveOpenGroups();
+        if (query) {
+          // Во время поиска — в эфемерный набор. Запись в stateOpenGroups
+          // здесь СТИРАЛА БЫ раскрытие, поставленное до поиска: свернуть
+          // группу в выдаче значит «сейчас не мешай», а не «забудь навсегда».
+          if (open) searchCollapsed.delete(g); else searchCollapsed.add(g);
+        } else {
+          if (open) stateOpenGroups.add(g); else stateOpenGroups.delete(g);
+          saveOpenGroups();
+        }
         tb.classList.toggle("sg-closed", !open);
         const btn = tb.querySelector(".sg-toggle");
         if (btn) {
@@ -573,6 +637,20 @@ async function loadState(useCache) {
     });
   } catch (e) {
     if (seq && _stale("state", seq)) return;
+    // Кэш снимаем. С ним на руках остаются строки неизвестной свежести, а
+    // любая перерисовка по кэшу молча заменила бы ими текст ошибки, выдав
+    // устаревшее за текущее. Пока кэша не было у кого спросить, это никого
+    // не жгло: единственной такой перерисовкой была сортировка, а её кнопка
+    // живёт ВНУТРИ #state-body и вместе с таблицей исчезала. Поле поиска
+    // лежит снаружи и переживает ошибку — то есть путь появился.
+    // Без кэша resortState ничего не делает, и ошибка остаётся на экране
+    // до следующего «Обновить».
+    //
+    // Гонку закрывает _stale строкой выше — ответ, обогнанный более свежим,
+    // до сюда не доходит и чужой кэш не снимает. Линтер видит «запись после
+    // await», но гейта не видит; то же подавление стоит и на записи кэша.
+    // eslint-disable-next-line require-atomic-updates
+    stateCache = null;
     body.innerHTML = `<p style="color:var(--bad)">${errHtml(e)}</p>`;
   }
 }
