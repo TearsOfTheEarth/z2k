@@ -70,15 +70,19 @@ owner's KeeneticOS 5.1.5 router, and Z2K must not replace its DNS service.
    It ignores malformed responses, unrelated additional records, private,
    loopback, multicast, documentation, and other non-routable destinations.
    Zero-TTL answers are not cached; positive TTLs are capped at one hour.
-   At most 4,096 selected domain rules and 8,192 live client/address pairs
+   At most 4,096 selected domain rules, 128 clients, and 8,192 live client/address pairs
    are retained. Packets larger than the observation cap are skipped and an
    overflow counter is exposed, so memory and CPU cannot grow without limit.
-5. A separate timeout-capable `z2k_warp_dns` ipset stores the client/destination
-   pairs. The PREROUTING rule matches source and destination against this set
-   and sets only the existing WARP mark bit. Static destinations remain global
-   in `z2k_warp`; domain-derived destinations affect only the client that got
-   the DNS reply. The existing ready-gated policy route applies both sets. No
-   WARP routing rule is placed in OUTPUT.
+5. A separate timeout-capable `hash:ip` set named `z2kd_<client IPv4>` stores
+   destinations for each LAN client. A PREROUTING rule for that client's source
+   address matches its destination set and sets only the existing WARP mark bit.
+   Static destinations remain global in `z2k_warp`; domain-derived destinations
+   affect only the client that got the DNS reply. The existing ready-gated policy
+   route applies both paths. No WARP routing rule is placed in OUTPUT. This
+   replaces the initially planned `hash:net,net` pair set: the owner's router's
+   ipset 7.24 userspace advertises it, but its Keenetic 4.9 kernel returns
+   `set type not supported` on creation. A real `hash:ip` set with timeout and
+   dotted client name was created and exercised successfully on 2026-09-23.
 6. The observer persists a small, bounded snapshot of unexpired pairs under
    `/tmp/z2k-warp`, so a daemon reconnect or restart does not discard a DNS
    answer still cached by a client. A snapshot is restored only after checking
@@ -98,7 +102,7 @@ owner's KeeneticOS 5.1.5 router, and Z2K must not replace its DNS service.
   not alter routes. Reaching a domain/pair cap leaves existing routes intact
   and reports the skipped addition.
 - If the tunnel is not ready, existing fail-open behavior removes WARP policy
-  routing. The DNS set may still learn answers for when the tunnel returns.
+  routing. Client DNS sets may still learn answers for when the tunnel returns.
 - A client with cached DNS from before the observer starts may initially use
   the direct route until it resolves again. The same applies after reboot and
   to unseen wildcard subdomains. Exact names may be prewarmed through the

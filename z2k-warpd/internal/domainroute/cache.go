@@ -6,6 +6,7 @@ import (
 )
 
 const MaxPairs = 8192
+const MaxClients = 128
 const maxJustifications = 16384
 
 type pair struct{ client, dest netip.Addr }
@@ -25,7 +26,7 @@ func (c *Cache) Len() int        { return len(c.pairs) }
 func (c *Cache) Skipped() uint64 { return c.skipped }
 
 func (c *Cache) Observe(client netip.Addr, name string, answers []Answer, now time.Time) []Change {
-	if !client.Is4() || client.IsLoopback() || !c.rules.Match(name) {
+	if _, err := clientSet(client); err != nil || !c.rules.Match(name) {
 		return nil
 	}
 	var changes []Change
@@ -34,16 +35,16 @@ func (c *Cache) Observe(client netip.Addr, name string, answers []Answer, now ti
 			continue
 		}
 		k := pair{client, a.IP}
+		if _, exists := c.pairs[k][name]; !exists && c.justificationCount() >= maxJustifications {
+			c.skipped++
+			continue
+		}
 		if _, ok := c.pairs[k]; !ok {
-			if len(c.pairs) >= MaxPairs {
+			if len(c.pairs) >= MaxPairs || (!c.hasClient(client) && c.clientCount() >= MaxClients) {
 				c.skipped++
 				continue
 			}
 			c.pairs[k] = make(map[string]time.Time)
-		}
-		if _, exists := c.pairs[k][name]; !exists && c.justificationCount() >= maxJustifications {
-			c.skipped++
-			continue
 		}
 		before := latest(c.pairs[k])
 		ttl := min(a.TTL, time.Hour)
@@ -54,6 +55,22 @@ func (c *Cache) Observe(client netip.Addr, name string, answers []Answer, now ti
 		}
 	}
 	return changes
+}
+
+func (c *Cache) hasClient(client netip.Addr) bool {
+	for k := range c.pairs {
+		if k.client == client {
+			return true
+		}
+	}
+	return false
+}
+func (c *Cache) clientCount() int {
+	seen := make(map[netip.Addr]struct{})
+	for k := range c.pairs {
+		seen[k.client] = struct{}{}
+	}
+	return len(seen)
 }
 
 func (c *Cache) justificationCount() int {

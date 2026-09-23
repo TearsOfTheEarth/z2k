@@ -45,4 +45,11 @@ want='v1
 *.example.com
 example.com'
 [ "$got" = "$want" ] || { printf 'snapshot mismatch\n%s\n' "$got"; exit 1; }
+WARP_FILTER="$sb/missing.awk"
+if warp_domains_load; then printf 'missing filter accepted\n'; exit 1; fi
+[ "$(cat "$WARP_DOMAINS")" = "$want" ] || { printf 'missing filter damaged live snapshot\n'; exit 1; }
+WARP_FILTER="$filter"
+awk 'BEGIN { for (i=0; i<4097; i++) printf "host%d.example.com\n", i }' > "$WARP_LISTS_DIR/a.txt"
+warp_domains_load || { printf 'domain overflow disabled static WARP\n'; exit 1; }
+[ "$(cat "$WARP_DOMAINS")" = 'v1' ] || { printf 'domain overflow kept stale routes\n'; exit 1; }
 printf 'WARP domain filter passed\n'

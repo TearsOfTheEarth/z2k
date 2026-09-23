@@ -76,12 +76,15 @@ func (c *Cache) Load(path string, now time.Time) error {
 	for _, e := range s.Entries {
 		client, ce := netip.ParseAddr(e.Client)
 		dest, de := netip.ParseAddr(e.Dest)
-		if ce != nil || de != nil || !client.Is4() || !EligibleDestination(dest) || !c.rules.Match(e.Name) || e.Expiry <= now.Unix() {
+		if ce != nil || de != nil || !EligibleDestination(dest) || !c.rules.Match(e.Name) || e.Expiry <= now.Unix() {
+			continue
+		}
+		if _, err := clientSet(client); err != nil {
 			continue
 		}
 		k := pair{client, dest}
 		if _, ok := c.pairs[k]; !ok {
-			if len(c.pairs) >= MaxPairs {
+			if len(c.pairs) >= MaxPairs || (!c.hasClient(client) && c.clientCount() >= MaxClients) {
 				c.skipped++
 				continue
 			}

@@ -2081,7 +2081,7 @@ warp_lists() {
         [ -f "$f" ] || continue
         name=$(basename "$f" .txt)
         [ "$name" = "devices" ] && continue   # устройства — своя карточка, не список адресов
-        entries=$(awk '{sub(/\r$/,""); gsub(/^[ \t]+|[ \t]+$/,"")} /^([0-9]{1,3}\.){3}[0-9]{1,3}(\/[0-9]{1,2})?$/{n++} END{print n+0}' "$f")
+        entries=$(_warp_destination_count "$f")
         size=$(wc -c < "$f" | tr -d ' ')
         # busybox: date -r (no stat -c), see update_status_string
         mtime=$(date -r "$f" +%s 2>/dev/null)
@@ -2106,6 +2106,11 @@ warp_game_enabled() {
     grep -qxF "$1" "$WARP_ENABLED_FILE" 2>/dev/null
 }
 
+_warp_destination_count() {
+    awk -v mode=save -f "$ZAPRET2_DIR/z2k-warp-list-filter.awk" "$1" 2>/dev/null \
+        | awk '$0 !~ /^#/ && NF { n++ } END { print n+0 }'
+}
+
 warp_games() {
     # TSV: name<TAB>entries<TAB>enabled(0|1)
     warp_lists_ensure_dir
@@ -2113,7 +2118,7 @@ warp_games() {
     for f in "$WARP_GAMES_DIR"/*.txt; do
         [ -f "$f" ] || continue
         name=$(basename "$f" .txt)
-        entries=$(awk '{sub(/\r$/,""); gsub(/^[ \t]+|[ \t]+$/,"")} /^([0-9]{1,3}\.){3}[0-9]{1,3}(\/[0-9]{1,2})?$/{n++} END{print n+0}' "$f")
+        entries=$(_warp_destination_count "$f")
         printf '%s\t%s\t%s\n' "$name" "${entries:-0}" "$(warp_game_enabled "$name" && echo 1 || echo 0)"
     done
 }

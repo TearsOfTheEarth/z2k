@@ -140,6 +140,10 @@ printf "\n--- warp_list_save: append mode ---\n"
 OUT=$(printf 'Example.COM\n*.Example.COM\n' | warp_list_save domain-test create)
 assert_contains "domain save counts names" "saved_domain=2" "$OUT"
 assert_eq "domain save normalizes names" 'example.com,*.example.com,' "$(tr '\n' ',' < "$WARP_LISTS_DIR/domain-test.txt")"
+assert_eq "domain-only list shows two entries" "2" "$(warp_lists | awk -F'\t' '$1=="domain-test"{print $2}')"
+printf 'example.com\n*.game.example\n' > "$WARP_LISTS_DIR/games/Domain_Game.txt"
+assert_eq "game domain count shows two entries" "2" "$(warp_games | awk -F'\t' '$1=="Domain_Game"{print $2}')"
+rm -f "$WARP_LISTS_DIR/games/Domain_Game.txt"
 warp_list_delete domain-test
 OUT=$(printf '4.4.4.4\n' | warp_list_save test append)
 assert_contains "append saved=1" "saved=1" "$OUT"
@@ -275,6 +279,8 @@ printf '9.9.9.9\nмусор\n' > "$BODYF"
 OUT=$(cgi POST /warp/list/save "name=cgi-test&mode=replace" "$BODYF" | cgi_body)
 assert_contains "save via CGI: ok"              '"ok":true'           "$OUT"
 assert_contains "save via CGI: saved=1"         '"saved":1'           "$OUT"
+assert_contains "save via CGI: IP count"        '"saved_ip":1'        "$OUT"
+assert_contains "save via CGI: domain count"    '"saved_domain":0'    "$OUT"
 assert_contains "save via CGI: skipped=1"       '"skipped_invalid":1' "$OUT"
 
 OUT=$(cgi GET /warp/lists "" | cgi_body)
@@ -293,6 +299,7 @@ assert_eq "no file escaped lists dir" "0" "$([ -e "$LISTS_DIR/evil.txt" ] && ech
 OUT=$(cgi GET /warp/status "" | cgi_body)
 assert_contains "status: enabled flag"          '"enabled":"0"'       "$OUT"
 assert_contains "status: entries field"         '"entries":'          "$OUT"
+assert_contains "status: domain observer state" '"domain_active":false' "$OUT"
 
 printf 'name=cgi-test' > "$BODYF"
 OUT=$(cgi POST /warp/list/delete "" "$BODYF" | cgi_body)

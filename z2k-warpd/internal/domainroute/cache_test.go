@@ -1,6 +1,7 @@
 package domainroute
 
 import (
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
@@ -39,6 +40,46 @@ func TestCacheScopesPairsToClientAndKeepsSharedJustification(t *testing.T) {
 	changes = c.ReplaceRules(r, now)
 	if len(changes) != 1 || !changes[0].Delete || c.Len() != 0 {
 		t.Fatalf("not deleted after both names removed: %+v", changes)
+	}
+}
+
+func TestCacheJustificationCapDoesNotLeaveEmptyRoute(t *testing.T) {
+	r, _ := ParseRules([]byte("v1\n*.example.com\n"))
+	c := NewCache(r)
+	k := pair{netip.MustParseAddr("192.168.1.10"), netip.MustParseAddr("8.8.8.8")}
+	c.pairs[k] = make(map[string]time.Time)
+	for i := 0; i < maxJustifications; i++ {
+		c.pairs[k][fmt.Sprintf("n%d.example.com", i)] = time.Unix(200, 0)
+	}
+	got := c.Observe(netip.MustParseAddr("192.168.1.11"), "new.example.com", []Answer{{netip.MustParseAddr("1.1.1.1"), 10 * time.Second}}, time.Unix(100, 0))
+	if len(got) != 0 || c.Len() != 1 {
+		t.Fatalf("cap left empty pair: changes=%+v pairs=%d", got, c.Len())
+	}
+}
+
+func TestCacheCapsDistinctClientsToBoundFirewallRules(t *testing.T) {
+	r, _ := ParseRules([]byte("v1\nselected.example\n"))
+	c := NewCache(r)
+	now := time.Unix(100, 0)
+	ip := netip.MustParseAddr("8.8.8.8")
+	for i := 1; i <= 128; i++ {
+		client := netip.AddrFrom4([4]byte{10, 0, 0, byte(i)})
+		if got := c.Observe(client, "selected.example", []Answer{{ip, 10 * time.Second}}, now); len(got) != 1 {
+			t.Fatalf("client %d rejected", i)
+		}
+	}
+	if got := c.Observe(netip.MustParseAddr("10.0.0.129"), "selected.example", []Answer{{ip, 10 * time.Second}}, now); len(got) != 0 || c.Len() != 128 {
+		t.Fatalf("129th client admitted: %+v pairs=%d", got, c.Len())
+	}
+}
+
+func TestCacheRejectsNonLANClient(t *testing.T) {
+	r, _ := ParseRules([]byte("v1\nselected.example\n"))
+	c := NewCache(r)
+	got := c.Observe(netip.MustParseAddr("8.8.4.4"), "selected.example",
+		[]Answer{{netip.MustParseAddr("1.1.1.1"), time.Minute}}, time.Unix(100, 0))
+	if len(got) != 0 || c.Len() != 0 {
+		t.Fatalf("public source admitted: %+v", got)
 	}
 }
 
