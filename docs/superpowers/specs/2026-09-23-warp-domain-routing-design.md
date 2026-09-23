@@ -12,12 +12,17 @@ router. The owner explicitly accepted that devices resolving through their own
 DoH/DoT are outside this stage. Existing IPv4/CIDR lists and whole-device WARP
 selection keep their behavior. This change does not release or deploy itself.
 
-Cloudflare's domain-based Split Tunnels provide the behavioral reference: an
-observed DNS answer dynamically supplies route addresses. Z2K is a router-side
-implementation, not Cloudflare's per-device client. It cannot claim identical
-coverage where DNS never traverses the router in readable form. Exact names and
-`*.example.com` follow Cloudflare's explicit matching semantics: the wildcard
-matches subdomains but not the apex. A user who wants both enters both lines.
+The product distinction matters. Consumer Cloudflare WARP normally tunnels all
+device traffic and handles DNS; it does not need a domain list to select what
+enters the tunnel. **Cloudflare One Client** domain-based Split Tunnels are the
+behavioral reference for selective routing: its local DNS proxy handles each
+device's lookup and dynamically supplies route addresses. Z2K instead observes
+DNS replies at the router. It is an adaptation of the name-to-address routing
+principle, not an implementation of Cloudflare's client-side DNS proxy, and
+cannot claim identical coverage where DNS never traverses the router in
+readable form. Exact names and `*.example.com` follow Cloudflare One's explicit
+matching semantics: the wildcard matches subdomains but not the apex. A user
+who wants both enters both lines.
 
 ## Existing system
 
@@ -144,3 +149,13 @@ DNS interception settings, or other Keenetic connection policies.
   is unaffected. Check memory and CPU during representative DNS traffic.
 - Run existing WARP, panel, update, and router-recovery suites; do not publish
   a release as part of this work.
+
+## Reference behavior
+
+- [Consumer WARP modes](https://developers.cloudflare.com/warp-client/warp-modes/):
+  Traffic and DNS tunnels all device traffic; DNS may use UDP, DoT, or DoH.
+- [Cloudflare One Client architecture](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/route-traffic/client-architecture/):
+  the per-device client installs a local DNS proxy.
+- [Cloudflare One Split Tunnels](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/route-traffic/split-tunnels/):
+  domain answers dynamically produce IP routes and shared IPs can affect other
+  hostnames. Domain-based rules require the client to handle the lookup.
