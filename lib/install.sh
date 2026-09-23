@@ -2280,6 +2280,8 @@ TMPJUNK
             print_warning "${tool_script}: не удалось развернуть ни из кэша, ни с GitHub — установленная копия могла остаться старой"
         fi
     done
+    deploy_critical_file "files/z2k-warp-list-filter.awk" "${ZAPRET2_DIR}/z2k-warp-list-filter.awk" 644 \
+        || print_warning "WARP: не удалось установить фильтр адресов и доменов"
 
     # Install ALL lib/*.sh modules to persistent ${ZAPRET2_DIR}/lib/.
     # Background: z2k.sh sources modules from $WORK_DIR/lib (tmpfs) which

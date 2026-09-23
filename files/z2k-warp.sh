@@ -60,6 +60,8 @@ WARP_LISTS_DIR="${WARP_LISTS_DIR:-$ZAPRET2_DIR/lists/warp}"
 WARP_DEVICES_FILE="${WARP_DEVICES_FILE:-$WARP_LISTS_DIR/devices.txt}"
 WARP_IPSET="${WARP_IPSET:-z2k_warp}"
 WARP_IPSET_SRC="${WARP_IPSET_SRC:-z2k_warp_src}"
+WARP_FILTER="${WARP_FILTER:-$ZAPRET2_DIR/z2k-warp-list-filter.awk}"
+WARP_DOMAINS="${WARP_DOMAINS:-/tmp/z2k-warp/domains.v1}"
 WARP_TABLE="${WARP_TABLE:-989}"
 WARP_MARK="${WARP_MARK:-0x989}"
 WARP_RULE_PREF="${WARP_RULE_PREF:-90}"
@@ -200,35 +202,10 @@ warp_ipset_load() {
     ipset destroy "$tmpset" 2>/dev/null
     ipset create "$tmpset" hash:net family inet 2>/dev/null
     ipset list "$tmpset" >/dev/null 2>&1 || { _wlog "cannot create temp ipset $tmpset"; return 1; }
-    if warp_active_lists | while IFS= read -r _wl; do cat "$_wl" 2>/dev/null; done | awk -v set="$tmpset" '
-# --- z2k warp address filter (canonical; keep byte-identical in all 3 copies) ---
-function z2k_warp_addr_ok(s,   ip, h, o) {
-    if (s !~ /^[1-9][0-9]{0,2}(\.(0|[1-9][0-9]{0,2})){3}(\/([1-9]|[12][0-9]|3[0-2]))?$/) return 0
-    ip = s
-    if (split(s, h, "/") == 2) ip = h[1]
-    # No width cap. There was one at /10, on the reasoning that no game lives on
-    # a /8 — but the blocks it cut are 3.0.0.0/8 and 15.0.0.0/8, i.e. Amazon,
-    # which is exactly what people switch WARP on for. /0 is still impossible:
-    # the grammar above only accepts prefixes 1-32.
-    split(ip, o, ".")
-    if (o[1] > 255 || o[2] > 255 || o[3] > 255 || o[4] > 255) return 0
-    if (o[1] == 10 || o[1] == 127 || o[1] >= 224) return 0
-    if (o[1] == 100 && o[2] >= 64 && o[2] <= 127) return 0
-    if (o[1] == 169 && o[2] == 254) return 0
-    if (o[1] == 172 && o[2] >= 16 && o[2] <= 31) return 0
-    if (o[1] == 192 && o[2] == 168) return 0
-    if (o[1] == 192 && o[2] == 0 && (o[3] == 0 || o[3] == 2)) return 0
-    if (o[1] == 198 && (o[2] == 18 || o[2] == 19)) return 0
-    if (o[1] == 198 && o[2] == 51 && o[3] == 100) return 0
-    if (o[1] == 203 && o[2] == 0 && o[3] == 113) return 0
-    return 1
-}
-# --- end z2k warp address filter ---
-        {
-            sub(/\r$/, ""); gsub(/^[ \t]+|[ \t]+$/, "")
-            if (!z2k_warp_addr_ok($0)) next
-            print "add " set " " $0 " -exist"
-        }' | ipset restore -exist 2>/dev/null; then
+    if warp_active_lists | while IFS= read -r _wl; do cat "$_wl" 2>/dev/null; done \
+        | awk -v mode=ipset -f "$WARP_FILTER" \
+        | awk -v set="$tmpset" '{ print "add " set " " $0 " -exist" }' \
+        | ipset restore -exist 2>/dev/null; then
         ipset swap "$tmpset" "$WARP_IPSET" 2>/dev/null \
             || { _wlog "ipset swap failed — keeping previous set"; ipset destroy "$tmpset" 2>/dev/null; return 1; }
         ipset destroy "$tmpset" 2>/dev/null
@@ -299,7 +276,21 @@ warp_ipset_src_load() {
     return 0
 }
 
-warp_ipset_all() { warp_ipset_load; warp_ipset_src_load; }
+warp_domains_load() {
+    local tmp="${WARP_DOMAINS}.new.$$" count
+    mkdir -p "$(dirname "$WARP_DOMAINS")" || return 1
+    { printf 'v1\n'; warp_active_lists | while IFS= read -r _wl; do cat "$_wl" 2>/dev/null; done \
+        | awk -v mode=domains -f "$WARP_FILTER" | LC_ALL=C sort -u; } > "$tmp" || { rm -f "$tmp"; return 1; }
+    count=$(awk 'END { print NR - 1 }' "$tmp")
+    if [ "$count" -gt 4096 ]; then
+        _wlog "too many WARP domain rules: $count"
+        rm -f "$tmp"
+        return 1
+    fi
+    mv -f "$tmp" "$WARP_DOMAINS"
+}
+
+warp_ipset_all() { warp_ipset_load && warp_domains_load; warp_ipset_src_load; }
 
 # ---- маршрутизация --------------------------------------------------------------
 # Снять правила в OUTPUT — ОТДЕЛЬНО И БЕЗУСЛОВНО.

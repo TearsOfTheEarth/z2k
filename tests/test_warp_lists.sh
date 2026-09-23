@@ -39,6 +39,7 @@ WARP_SCRIPT="$ZAPRET2_DIR/z2k-warp.sh";   export WARP_SCRIPT
 WARP_LISTS_DIR="$LISTS_DIR/warp";         export WARP_LISTS_DIR
 mkdir -p "$LISTS_DIR"
 cp "$SCRIPT_DIR/files/z2k-warp.sh" "$WARP_SCRIPT"
+cp "$SCRIPT_DIR/files/z2k-warp-list-filter.awk" "$ZAPRET2_DIR/z2k-warp-list-filter.awk"
 printf 'GAME_WARP_ENABLED=0\n' > "$CONFIG_FILE"
 # legacy shipped seed — источник одноразовой миграции
 printf '1.2.3.0/24\n5.6.7.8\n9.9.0.0/16\n' > "$LISTS_DIR/game-warp-ips.txt"
@@ -136,6 +137,10 @@ assert_eq "existing list untouched by refused create" "6.6.6.6" "$(cat "$WARP_LI
 warp_list_delete fresh
 
 printf "\n--- warp_list_save: append mode ---\n"
+OUT=$(printf 'Example.COM\n*.Example.COM\n' | warp_list_save domain-test create)
+assert_contains "domain save counts names" "saved_domain=2" "$OUT"
+assert_eq "domain save normalizes names" 'example.com,*.example.com,' "$(tr '\n' ',' < "$WARP_LISTS_DIR/domain-test.txt")"
+warp_list_delete domain-test
 OUT=$(printf '4.4.4.4\n' | warp_list_save test append)
 assert_contains "append saved=1" "saved=1" "$OUT"
 assert_eq "old line survived append" "1" "$(grep -c '^8.8.8.8$' "$WARP_LISTS_DIR/test.txt")"
@@ -217,40 +222,22 @@ assert_not_contains "loader drops leading-zero pfx"  "/08"                      
 rm -f "$WARP_LISTS_DIR/loader.txt"
 
 printf "\n--- filter parity: loader (z2k-warp.sh) vs save (actions.sh) ---\n"
-# Оба фильтра обязаны использовать ОДИН регэксп — рассинхрон означает, что
-# сохранённая строка может убить restore-поток. Ищем literal-вхождение
-# канонического регэкспа в обоих файлах (fixed-string grep).
-# The rule is now a whole awk function, not one regex: shape AND routability.
-# Comparing the function body byte-for-byte across all THREE copies is what
-# keeps them from drifting — a rule that rejects a range in the loader but
-# accepts it on save would let the panel write a line the ipset then refuses.
-_filter_of() { awk '/^# --- z2k warp address filter/,/^# --- end z2k warp address filter/' "$1" | sed 's/^[[:space:]]*//'; }
-_f_loader=$(_filter_of "$SCRIPT_DIR/files/z2k-warp.sh")
-_f_save=$(_filter_of "$SCRIPT_DIR/webpanel/cgi/actions.sh")
-_f_upd=$(_filter_of "$SCRIPT_DIR/files/z2k-update-lists.sh")
-assert_eq "loader carries the canonical filter" "1" "$([ -n "$_f_loader" ] && echo 1 || echo 0)"
-assert_eq "save filter identical to loader"     "1" "$([ "$_f_save" = "$_f_loader" ] && echo 1 || echo 0)"
-assert_eq "refresh filter identical to loader"  "1" "$([ "$_f_upd"  = "$_f_loader" ] && echo 1 || echo 0)"
+# The actual shared parser is exercised here. Save and upstream behavior have
+# separate end-to-end assertions; source-text parity no longer adds coverage.
+_filter="$SCRIPT_DIR/files/z2k-warp-list-filter.awk"
 
 printf "\n--- filter: routability, not just shape ---\n"
 # Every one of these was present in the shipped 14k list and routed into the
 # tunnel: private ranges, loopback, and the user's own LAN. 3.0.0.0/8 is a real
 # Amazon block but no game lives on a /8 — the width cap is what stops those.
 _reject() {
-    # NEWLINE before the rule: the extracted block ends with a COMMENT line, so
-    # concatenating directly would make the rule part of that comment and the
-    # program would emit nothing — every assertion then "fails" identically.
-    _v=$(printf '%s\n' "$1" | awk "$_f_loader
-{ print (z2k_warp_addr_ok(\$0) ? \"pass\" : \"drop\") }")
+    _v=$(printf '%s\n' "$1" | awk -v mode=ipset -f "$_filter")
+    [ -n "$_v" ] && _v=pass || _v=drop
     assert_eq "rejected: $1" "drop" "$_v"
 }
 _accept() {
-    # NEWLINE before the rule: the extracted block ends with a COMMENT line, so
-    # concatenating directly would make the rule part of that comment and the
-    # program would emit nothing — every assertion then "fails" identically.
-    _v=$(printf '%s\n' "$1" | awk "$_f_loader
-{ print (z2k_warp_addr_ok(\$0) ? \"pass\" : \"drop\") }")
-    assert_eq "accepted: $1" "pass" "$_v"
+    _v=$(printf '%s\n' "$1" | awk -v mode=ipset -f "$_filter")
+    assert_eq "accepted: $1" "$1" "$_v"
 }
 for _bad in 0.0.0.0/0 10.0.0.0/8 127.0.0.0/8 192.168.0.0/16 192.168.1.1 172.16.5.0/24 \
             169.254.1.1 100.64.0.1 224.0.0.1 240.0.0.1 255.255.255.255 \
@@ -331,7 +318,6 @@ assert_not_contains "drops IPv6"         "2a00"         "$SAN"
 assert_not_contains "drops /0"           "0.0.0.0/0"    "$SAN"
 assert_not_contains "drops leading-zero" "08.8.8.8"     "$SAN"
 assert_not_contains "drops comment"      "# comment"    "$SAN"
-assert_eq "update-lists uses canonical regex" "1" "$(grep -cF '/^[1-9][0-9]{0,2}(\.(0|[1-9][0-9]{0,2})){3}(\/([1-9]|[12][0-9]|3[0-2]))?$/' "$SCRIPT_DIR/files/z2k-update-lists.sh")"
 
 printf "\n--- переустановка сохраняет выключенные свои списки ---\n"
 # Без переноса .disabled все выключенные человеком списки молча включались бы

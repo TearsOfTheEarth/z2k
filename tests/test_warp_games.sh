@@ -54,6 +54,7 @@ LOG_FILE="$SB/update-lists.log"
 WDIR="$ZAPRET2_DIR/lists/warp"
 GDIR="$WDIR/games"
 mkdir -p "$GDIR"
+cp "$SCRIPT_DIR/files/z2k-warp-list-filter.awk" "$ZAPRET2_DIR/z2k-warp-list-filter.awk"
 
 # --- stubs -------------------------------------------------------------------
 # z2k_fetch serves the index; update_list serves per-game files and returns the
@@ -113,6 +114,9 @@ update_warp_game_list >/dev/null 2>&1
 # 3.0.0.0/8 остаётся: это Amazon, а не мусор. Отсеиваются только
 # нероутируемые и служебные.
 assert_eq "остаются только маршрутизируемые" "3.0.0.0/8,8.8.8.8," "$(setof "$GDIR/Steam.txt")"
+printf 'Example.COM\n*.game.example\n10.0.0.1\n' > "$SB/up/Steam.txt"
+update_warp_game_list >/dev/null 2>&1
+assert_eq "upstream domains survive and normalize" '*.game.example,example.com,' "$(setof "$GDIR/Steam.txt")"
 
 printf "\n--- refresh: an all-junk list leaves no file ---\n"
 # Better no list than an empty one the panel would offer as a switch.

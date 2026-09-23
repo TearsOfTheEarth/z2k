@@ -110,7 +110,7 @@ z2k_install_paths() {
         files/S99zapret2.new)
             echo "/opt/etc/init.d/S99zapret2"
             ;;
-        files/*.sh|files/*.lua)
+        files/*.sh|files/*.lua|files/*.awk)
             echo "${zd}/${repo_path#files/}"
             ;;
         lib/*)
