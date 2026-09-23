@@ -2091,7 +2091,7 @@ warp_lists() {
 }
 
 # ---- upstream per-game lists (read-only) -------------------------------------
-# These come from medvedeff-true/ru-gaming-blocklist, one file per game, and are
+# These come from YOZH3G/ru-gaming-blocklist, one file per game, and are
 # refreshed wholesale by z2k-update-lists.sh. The panel may switch them on and
 # off but must never edit them: the next refresh would overwrite the edit, and a
 # setting that silently reverts is worse than no setting.

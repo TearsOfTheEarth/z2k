@@ -1559,6 +1559,10 @@ step_build_zapret2() {
             # переустановки все они молча включались бы обратно.
             [ -f "$ZAPRET2_DIR/lists/warp/.disabled" ] && \
                 cp -f "$ZAPRET2_DIR/lists/warp/.disabled" "$backup_tmp/warp-lists/.disabled" 2>/dev/null
+            # Source identity belongs with the cached game files. Without it,
+            # the next refresh mistakes a restored cache for the previous fork.
+            [ -f "$ZAPRET2_DIR/lists/warp/.games-source" ] && \
+                cp -f "$ZAPRET2_DIR/lists/warp/.games-source" "$backup_tmp/warp-lists/.games-source" 2>/dev/null
             # Игровые списки (games/*.txt) — апстрим-данные, и раньше их
             # намеренно не сохраняли: «пере-скачаются». Пере-скачивались они
             # каждый раз и в ПЕРЕДНЕМ плане: шаг, который сам себя подписывает
@@ -2471,6 +2475,8 @@ TMPJUNK
             cp -f "$backup_tmp/warp-lists/.enabled" "${ZAPRET2_DIR}/lists/warp/.enabled" 2>/dev/null
         [ -f "$backup_tmp/warp-lists/.disabled" ] && \
             cp -f "$backup_tmp/warp-lists/.disabled" "${ZAPRET2_DIR}/lists/warp/.disabled" 2>/dev/null
+        [ -f "$backup_tmp/warp-lists/.games-source" ] && \
+            cp -f "$backup_tmp/warp-lists/.games-source" "${ZAPRET2_DIR}/lists/warp/.games-source" 2>/dev/null
         # Отчёт о переносе — здесь, а не в чужом блоке.
         #
         # Стояла эта строка внутри восстановления custom-strategies, то есть

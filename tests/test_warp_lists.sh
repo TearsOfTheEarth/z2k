@@ -306,8 +306,8 @@ OUT=$(cgi POST /warp/list/delete "" "$BODYF" | cgi_body)
 assert_contains "delete via CGI: ok"            '"ok":true'           "$OUT"
 assert_eq "file gone after CGI delete" "0" "$([ -f "$WARP_LISTS_DIR/cgi-test.txt" ] && echo 1 || echo 0)"
 
-printf "\n--- update-lists: medvedeff fetch sanitize (offline, awk only) ---\n"
-# Игровой список тянется живьём из medvedeff-true/ru-gaming-blocklist в
+printf "\n--- update-lists: YOZH3G fetch sanitize (offline, awk only) ---\n"
+# Игровой список тянется живьём из YOZH3G/ru-gaming-blocklist в
 # z2k-update-lists.sh и санитайзится тем же строгим IPv4-фильтром. Здесь
 # проверяем именно санитайз-стадию на сыром upstream-образце (v6 + мусор).
 RAW="$SB/upstream.raw"

@@ -602,9 +602,9 @@ update_list() {
 }
 
 # WARP game lists — ONE FILE PER GAME, pulled from the community-maintained
-# medvedeff-true/ru-gaming-blocklist.
+# YOZH3G/ru-gaming-blocklist (the reviewed, conservative fork).
 #
-# We used to pull that repo's combined `medvedeff-game-ipset.txt` and load it
+# We used to pull the original repo's combined `medvedeff-game-ipset.txt` and load it
 # whole. Measured on the shipped snapshot: 14297 entries covering 643 million
 # addresses — 15% of all IPv4 — including 10.0.0.0/8, 127.0.0.0/8 and
 # 192.168.0.0/16, i.e. private space and the user's own LAN routed into a
@@ -612,9 +612,9 @@ update_list() {
 # games it was meant to help, and every tunnel hiccup read as "the internet is
 # down" (issue #26).
 #
-# The same repo already publishes per-game lists under games/, so someone who
-# wants Steam gets Steam's 59 entries instead of fourteen thousand. Which ones
-# are loaded is the user's choice (see .enabled in z2k-warp.sh); on a fresh
+# The fork publishes per-game lists under games/. Its global IP set has no
+# per-game ownership, so it is deliberately not loaded for a game toggle.
+# Which lists are loaded is the user's choice (see .enabled in z2k-warp.sh); on a fresh
 # install, none.
 #
 # These files are UPSTREAM data, not user data: overwritten wholesale on every
@@ -626,7 +626,7 @@ update_list() {
 # Top-level (not nested in main) so the unit tests can drive it against a
 # stubbed update_list.
 update_warp_game_list() {
-    local base_url="${Z2K_WARP_BASE_URL:-https://raw.githubusercontent.com/medvedeff-true/ru-gaming-blocklist/main}"
+    local base_url="${Z2K_WARP_BASE_URL:-https://raw.githubusercontent.com/YOZH3G/ru-gaming-blocklist/main}"
     local wdir="${ZAPRET2_DIR}/lists/warp"
     local gdir="$wdir/games"
     local idx="$wdir/.games-index.json"
@@ -679,6 +679,22 @@ update_warp_game_list() {
     if [ -z "$names" ]; then
         log_msg "FAIL: warp games index has no usable game names — keeping current lists"
         return 1
+    fi
+
+    # A source switch must not reuse the previous owner's .raw body or ETag.
+    # The cleaned fork is intentionally much smaller (e.g. Warframe), so the
+    # generic >50% shrink guard would otherwise reject it and keep old data.
+    # Preserve the visible .txt files until each new download succeeds.
+    local source_file="$wdir/.games-source" _cache _source_tmp
+    if [ "$(cat "$source_file" 2>/dev/null)" != "$base_url" ]; then
+        for _cache in "$gdir"/.*.raw "$gdir"/.*.raw.etag; do
+            [ -f "$_cache" ] || continue
+            rm -f "$_cache" || { log_msg "FAIL: cannot clear previous game-list cache"; return 1; }
+        done
+        _source_tmp="${source_file}.new.$$"
+        printf '%s\n' "$base_url" > "$_source_tmp" && mv -f "$_source_tmp" "$source_file" \
+            || { rm -f "$_source_tmp"; log_msg "FAIL: cannot save game-list source"; return 1; }
+        log_msg "WARP game-list source changed: cache reset"
     fi
 
     # Z2K_LIST_QUIET_MISSING объявлен local НАМЕРЕННО: в ash local виден и
