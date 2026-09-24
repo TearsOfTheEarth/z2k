@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -17,6 +16,22 @@ import (
 )
 
 var cfConnSemaphore chan struct{}
+
+// Маппинг IP Telegram DC → DC ID
+var dcIPToID = map[string]int{
+	"149.154.175.50":  1,
+	"149.154.167.51":  2,
+	"149.154.175.100": 3,
+	"149.154.167.91":  4,
+	"149.154.171.5":   5,
+	"91.105.192.100":  203,
+	// Дополнительные IP (могут меняться)
+	"149.154.175.53":  1,
+	"149.154.167.53":  2,
+	"149.154.175.103": 3,
+	"149.154.167.93":  4,
+	"149.154.171.7":   5,
+}
 
 func runCfProxy() error {
 	cfConnSemaphore = make(chan struct{}, *maxConns)
@@ -44,7 +59,6 @@ func runCfProxy() error {
 
 	wsPool := newWsPool(cfMgr)
 	go wsPool.rotationLoop()
-	go wsPool.warmup()
 
 	var wg sync.WaitGroup
 	for _, ln := range lns {
@@ -105,6 +119,34 @@ func cfHandleConn(clientConn *net.TCPConn, cfMgr *cfProxyManager, wsPool *wsPool
 	clientConn.SetNoDelay(true)
 	clientConn.SetDeadline(time.Now().Add(*connTimeout))
 
+	// Извлекаем оригинальный IP назначения (Telegram DC) через SO_ORIGINAL_DST
+	origIP, origPort, err := getOriginalDst(clientConn)
+	if err != nil {
+		if *verbose {
+			log.Printf("[cfproxy] getOriginalDst failed: %v", err)
+		}
+		return
+	}
+
+	// Определяем DC ID по IP
+	dcID := ipToDCID(origIP.String())
+	if dcID == 0 {
+		if *verbose {
+			log.Printf("[cfproxy] unknown Telegram DC IP: %s:%d from %s",
+				origIP, origPort, clientConn.RemoteAddr())
+		}
+		return
+	}
+
+	// Определяем, media ли это трафик (DC 2 и 4 обычно media)
+	isMedia := dcID == 2 || dcID == 4
+
+	if *verbose {
+		log.Printf("[cfproxy] %s → %s:%d (DC%d%s)",
+			clientConn.RemoteAddr(), origIP, origPort, dcID, mediaTag(isMedia))
+	}
+
+	// Читаем init пакет (64 байта MTProto obfuscation)
 	initBuf := make([]byte, 64)
 	n, err := clientConn.Read(initBuf)
 	if err != nil {
@@ -114,31 +156,19 @@ func cfHandleConn(clientConn *net.TCPConn, cfMgr *cfProxyManager, wsPool *wsPool
 		return
 	}
 
-	dcID := extractCfDCID(initBuf[:n])
-	if dcID == 0 {
-		if *verbose {
-			log.Printf("[cfproxy] cannot extract DC ID from %s", clientConn.RemoteAddr())
-		}
-		return
-	}
-
-	isMedia := dcID == 4
-
-	if *verbose {
-		log.Printf("[cfproxy] %s → DC%d%s", clientConn.RemoteAddr(), dcID, mediaTag(isMedia))
-	}
-
+	// Пробуем получить соединение из пула
 	var conn *wsPoolConn
-	conn = wsPool.get(dcID, isMedia)
+	conn = wsPool.get(dcID, isMedia, origIP.String())
 	if conn != nil {
 		if *verbose {
 			log.Printf("[cfproxy] pool hit DC%d%s via %s", dcID, mediaTag(isMedia), conn.domain)
 		}
 	}
 
+	// Если в пуле нет - создаём новое
 	if conn == nil {
 		var err error
-		conn, err = wsPool.connect(dcID, isMedia)
+		conn, err = wsPool.connect(dcID, isMedia, origIP.String())
 		if err != nil {
 			log.Printf("[cfproxy] connect to DC%d%s failed: %v", dcID, mediaTag(isMedia), err)
 			return
@@ -152,13 +182,16 @@ func cfHandleConn(clientConn *net.TCPConn, cfMgr *cfProxyManager, wsPool *wsPool
 		wsPool.put(conn)
 	}()
 
+	// Отправляем init пакет
 	if err := conn.ws.WriteMessage(websocket.BinaryMessage, initBuf[:n]); err != nil {
 		log.Printf("[cfproxy] write init failed: %v", err)
 		return
 	}
 
+	// Bidirectional splice
 	done := make(chan struct{}, 2)
 
+	// Client → Telegram (через CF Worker)
 	go func() {
 		defer func() { done <- struct{}{} }()
 		buf := make([]byte, 32*1024)
@@ -175,6 +208,7 @@ func cfHandleConn(clientConn *net.TCPConn, cfMgr *cfProxyManager, wsPool *wsPool
 		}
 	}()
 
+	// Telegram → Client (через CF Worker)
 	go func() {
 		defer func() { done <- struct{}{} }()
 		for {
@@ -188,22 +222,36 @@ func cfHandleConn(clientConn *net.TCPConn, cfMgr *cfProxyManager, wsPool *wsPool
 		}
 	}()
 
+	// Ждём завершения одного из направлений
 	<-done
 }
 
-func extractCfDCID(buf []byte) int {
-	if len(buf) < 64 {
-		return 0
+// ipToDCID определяет DC ID по IP адресу Telegram DC
+func ipToDCID(ip string) int {
+	if dcID, ok := dcIPToID[ip]; ok {
+		return dcID
 	}
 
-	if len(buf) >= 64 {
-		dcID := int(binary.LittleEndian.Uint32(buf[60:64]))
-		if dcID >= 1 && dcID <= 5 {
-			return dcID
-		}
-		if dcID == 203 {
-			return 203
-		}
+	// Эвристика: проверяем подсети
+	// Telegram DC 1: 149.154.175.0/24
+	// Telegram DC 2: 149.154.167.0/24
+	// Telegram DC 3: 149.154.175.0/24
+	// Telegram DC 4: 149.154.167.0/24
+	// Telegram DC 5: 149.154.171.0/24
+	if strings.HasPrefix(ip, "149.154.175.") {
+		return 1 // или 3, но обычно 1
+	}
+	if strings.HasPrefix(ip, "149.154.167.") {
+		return 2 // или 4
+	}
+	if strings.HasPrefix(ip, "149.154.171.") {
+		return 5
+	}
+	if strings.HasPrefix(ip, "91.108.") {
+		return 2 // EU DC
+	}
+	if strings.HasPrefix(ip, "95.161.") {
+		return 4 // EU DC
 	}
 
 	return 0

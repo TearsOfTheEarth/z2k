@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ type wsPoolConn struct {
 	created time.Time
 	dcID    int
 	isMedia bool
+	dstIP   string
 	domain  string
 }
 
@@ -28,18 +30,8 @@ type wsPool struct {
 	checkEvery time.Duration
 	poolSize   int
 	cfMgr      *cfProxyManager
-	dcIPs      map[int]string
 	ctx        context.Context
 	cancel     context.CancelFunc
-}
-
-var telegramDCIPs = map[int]string{
-	1:   "149.154.175.50",
-	2:   "149.154.167.51",
-	3:   "149.154.175.100",
-	4:   "149.154.167.91",
-	5:   "149.154.171.5",
-	203: "91.105.192.100",
 }
 
 func newWsPool(cfMgr *cfProxyManager) *wsPool {
@@ -51,7 +43,6 @@ func newWsPool(cfMgr *cfProxyManager) *wsPool {
 		checkEvery: 5 * time.Second,
 		poolSize:   cfProxyPoolSize,
 		cfMgr:      cfMgr,
-		dcIPs:      telegramDCIPs,
 		ctx:        ctx,
 		cancel:     cancel,
 	}
@@ -59,7 +50,7 @@ func newWsPool(cfMgr *cfProxyManager) *wsPool {
 	return pool
 }
 
-func (p *wsPool) get(dcID int, isMedia bool) *wsPoolConn {
+func (p *wsPool) get(dcID int, isMedia bool, dstIP string) *wsPoolConn {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -67,7 +58,7 @@ func (p *wsPool) get(dcID int, isMedia bool) *wsPoolConn {
 
 	for i := len(p.conns) - 1; i >= 0; i-- {
 		conn := p.conns[i]
-		if conn.dcID != dcID || conn.isMedia != isMedia {
+		if conn.dcID != dcID || conn.isMedia != isMedia || conn.dstIP != dstIP {
 			continue
 		}
 
@@ -102,32 +93,31 @@ func (p *wsPool) put(conn *wsPoolConn) {
 	}
 }
 
-func (p *wsPool) connect(dcID int, isMedia bool) (*wsPoolConn, error) {
-	dcIP, ok := p.dcIPs[dcID]
-	if !ok {
-		return nil, fmt.Errorf("unknown DC ID: %d", dcID)
-	}
-
+func (p *wsPool) connect(dcID int, isMedia bool, dstIP string) (*wsPoolConn, error) {
 	domain := p.cfMgr.getRandomDomain()
 	if domain == "" {
 		return nil, fmt.Errorf("no CF proxy domains available")
 	}
 
-	var sni string
-	if isMedia {
-		sni = fmt.Sprintf("kws%d-1.%s", dcID, domain)
-	} else {
-		sni = fmt.Sprintf("kws%d.%s", dcID, domain)
+	// Формируем URL для CF Worker: wss://domain/apiws?dst=IP&dc=DC_ID
+	params := url.Values{}
+	params.Set("dst", dstIP)
+	params.Set("dc", fmt.Sprintf("%d", dcID))
+
+	wsURL := fmt.Sprintf("wss://%s/apiws?%s", domain, params.Encode())
+
+	if *verbose {
+		log.Printf("[wspool] connecting to CF Worker: %s", wsURL)
 	}
 
 	dialer := websocket.Dialer{
 		TLSClientConfig: &tls.Config{
-			ServerName:         sni,
 			InsecureSkipVerify: false,
 		},
 		HandshakeTimeout: 10 * time.Second,
 		NetDial: func(network, addr string) (net.Conn, error) {
-			conn, err := net.DialTimeout("tcp", net.JoinHostPort(dcIP, "443"), 10*time.Second)
+			// Подключаемся к IP CF proxy домена (не к Telegram DC!)
+			conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 			if err != nil {
 				return nil, err
 			}
@@ -138,11 +128,9 @@ func (p *wsPool) connect(dcID int, isMedia bool) (*wsPoolConn, error) {
 		},
 	}
 
-	wsURL := fmt.Sprintf("wss://%s/apiws", sni)
-
 	ws, _, err := dialer.Dial(wsURL, http.Header{})
 	if err != nil {
-		return nil, fmt.Errorf("WebSocket dial failed: %w", err)
+		return nil, fmt.Errorf("WebSocket dial to %s failed: %w", domain, err)
 	}
 
 	conn := &wsPoolConn{
@@ -150,6 +138,7 @@ func (p *wsPool) connect(dcID int, isMedia bool) (*wsPoolConn, error) {
 		created: time.Now(),
 		dcID:    dcID,
 		isMedia: isMedia,
+		dstIP:   dstIP,
 		domain:  domain,
 	}
 
@@ -179,22 +168,6 @@ func (p *wsPool) rotationLoop() {
 
 			p.conns = alive
 			p.mu.Unlock()
-		}
-	}
-}
-
-func (p *wsPool) warmup() {
-	for dcID := 1; dcID <= 5; dcID++ {
-		for _, isMedia := range []bool{false, true} {
-			conn, err := p.connect(dcID, isMedia)
-			if err != nil {
-				if *verbose {
-					log.Printf("[wspool] warmup DC%d%s failed: %v", dcID, mediaTag(isMedia), err)
-				}
-				continue
-			}
-			p.put(conn)
-			log.Printf("[wspool] warmup DC%d%s ready", dcID, mediaTag(isMedia))
 		}
 	}
 }
