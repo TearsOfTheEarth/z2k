@@ -38,10 +38,12 @@ var connSemaphore chan struct{}
 
 // wsWriter serializes all writes to a WebSocket connection.
 // gorilla/websocket supports only one concurrent writer.
+// wsWriter serializes all writes to a WebSocket connection.
+// gorilla/websocket supports only one concurrent writer.
 type wsWriter struct {
-	ws *websocket.Conn
-	mu sync.Mutex
-    deadline time.Time // Кэш дедлайна для избежания лишних SetWriteDeadline
+	ws       *websocket.Conn
+	mu       sync.Mutex
+	deadline time.Time // Кэш дедлайна для избежания лишних SetWriteDeadline
 }
 
 func (w *wsWriter) WriteMessage(messageType int, data []byte) error {

@@ -17,7 +17,7 @@ func newByteQueue(capBytes int64) *byteQueue {
 	return &byteQueue{
 		capB:   capBytes,
 		frames: make([][]byte, 0, 128), // Преаллокация избавляет от реаллокаций
-		notify: make(chan struct{}, 1),  // Буфер 1, чтобы не терять сигнал при push
+		notify: make(chan struct{}, 1), // Буфер 1, чтобы не терять сигнал при push
 	}
 }
 
