@@ -31,9 +31,23 @@ jobs:
         GOARCH: mipsle
         GOMIPS: softfloat
       run: |
+        # Проверка формата секрета
+        if [ -n "${{ secrets.Z2K_TUNNEL_SECRET }}" ]; then
+          if ! echo "${{ secrets.Z2K_TUNNEL_SECRET }}" | grep -qE '^[0-9a-fA-F]+$'; then
+            echo "ERROR: Z2K_TUNNEL_SECRET must be a hex string"
+            exit 1
+          fi
+          SECRET_FLAG="-X main.defaultTunnelSecret=${{ secrets.Z2K_TUNNEL_SECRET }}"
+          echo "Building WITH tunnel secret (length: ${#SECRET_FLAG})"
+        else
+          SECRET_FLAG=""
+          echo "WARNING: Z2K_TUNNEL_SECRET not set — binary will require --tunnel-secret at runtime"
+        fi
+        
         go build \
-          -ldflags="-s -w -X main.buildVersion=mt7628-$(date +%Y%m%d)" \
+          -ldflags="-s -w $SECRET_FLAG -X main.buildVersion=mt7628-$(date +%Y%m%d)" \
           -trimpath \
+          -buildvcs=false \
           -o tg-mtproxy-client-mt7628 \
           .
     
@@ -41,6 +55,14 @@ jobs:
       run: |
         file tg-mtproxy-client-mt7628
         ls -lh tg-mtproxy-client-mt7628
+        # Проверяем, что секрет вшит (если был передан)
+        if [ -n "${{ secrets.Z2K_TUNNEL_SECRET }}" ]; then
+          if strings tg-mtproxy-client-mt7628 | grep -q "${{ secrets.Z2K_TUNNEL_SECRET }}"; then
+            echo "✓ Tunnel secret successfully embedded in binary"
+          else
+            echo "WARNING: Secret may not be in binary (could be stripped)"
+          fi
+        fi
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
