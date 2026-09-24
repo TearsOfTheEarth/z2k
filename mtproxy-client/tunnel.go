@@ -179,6 +179,9 @@ type tunnelStream struct {
 	credit      atomic.Int64
 	creditWake  chan struct{}
 	recvUnacked atomic.Int64
+	// Оптимизация: кэшированные дедлайны для избежания лишних системных вызовов
+	writeDeadline time.Time
+	readDeadline  time.Time
 }
 
 func newTunnelStream(id uint16, conn *net.TCPConn, tc *tunnelClient) *tunnelStream {
@@ -229,20 +232,20 @@ func (s *tunnelStream) close() {
 func (s *tunnelStream) phoneWriter() {
 	tc := s.client
 	var consumed int64
-	// Выход из цикла: очередь закрыта (стрим уже закрывается), хвост после
-	// CLOSE релея дописан (закрываем сами) или контекст отменён.
 	defer s.close()
 	for s.outq.wait(tc.ctx.Done()) {
 		p, ok := s.outq.pop()
 		if !ok {
 			continue
 		}
-		// Дедлайн — тот же простой, что и на чтение (15 мин), а не 15 с:
-		// телефон в кармане не читает сокет минутами, и это норма. Соседей он
-		// не держит — у каждого стрима свой писатель, очередь ограничена окном.
-		// 15 с в r-82.1 рвали стримы уснувших телефонов, и Telegram на
-		// пробуждении показывал «Соединение… Обновление…» (03.09.2026).
-		s.conn.SetWriteDeadline(time.Now().Add(*connTimeout))
+
+		// Оптимизация: обновляем дедлайн записи не чаще раза в минуту
+		now := time.Now()
+		if s.writeDeadline.IsZero() || now.After(s.writeDeadline.Add(-1*time.Minute)) {
+			s.writeDeadline = now.Add(*connTimeout)
+			s.conn.SetWriteDeadline(s.writeDeadline)
+		}
+
 		if _, err := s.conn.Write(p); err != nil {
 			if *verbose {
 				log.Printf("[tunnel] stream %d write error: %v", s.id, err)
@@ -250,7 +253,7 @@ func (s *tunnelStream) phoneWriter() {
 			s.close()
 			return
 		}
-		s.conn.SetDeadline(time.Now().Add(*connTimeout))
+
 		if tc.v2.Load() {
 			consumed += int64(len(p))
 			if win := tc.window.Load(); win > 0 && consumed >= win/2 {
@@ -656,10 +659,12 @@ func (tc *tunnelClient) onControl(frame muxFrame) {
 func (tc *tunnelClient) streamReadLoop(stream *tunnelStream) {
 	defer stream.close()
 
-	buf := make([]byte, 16*1024)
+	// Оптимизация: выделяем буфер с запасом 3 байта под заголовок mux кадра.
+	// Это позволяет читать данные прямо в buf[3:] и избежать аллокации []byte в encodeMuxFrame.
+	buf := make([]byte, 16*1024+3)
 
 	for {
-		want := len(buf)
+		want := len(buf) - 3
 		if tc.v2.Load() {
 			for stream.credit.Load() <= 0 {
 				select {
@@ -675,19 +680,32 @@ func (tc *tunnelClient) streamReadLoop(stream *tunnelStream) {
 				want = int(cr)
 			}
 		}
-		n, err := stream.conn.Read(buf[:want])
+
+		n, err := stream.conn.Read(buf[3 : 3+want])
 		if n > 0 {
-			stream.conn.SetDeadline(time.Now().Add(*connTimeout))
+			// Оптимизация: обновляем дедлайн чтения не чаще раза в минуту
+			now := time.Now()
+			if stream.readDeadline.IsZero() || now.After(stream.readDeadline.Add(-1*time.Minute)) {
+				stream.readDeadline = now.Add(*connTimeout)
+				stream.conn.SetDeadline(stream.readDeadline)
+			}
 			if tc.v2.Load() {
 				stream.credit.Add(-int64(n))
 			}
-			frame := encodeMuxFrame(stream.id, muxDATA, buf[:n])
+
+			// Заполняем заголовок прямо в переиспользуемом буфере
+			binary.BigEndian.PutUint16(buf[0:2], stream.id)
+			buf[2] = muxDATA
+			frame := buf[:3+n]
+
 			tc.mu.Lock()
 			w := tc.writer
 			tc.mu.Unlock()
 			if w == nil {
 				return
 			}
+			// WriteMessage копирует данные или синхронно пишет в сокет,
+			// поэтому переиспользование buf на следующей итерации абсолютно безопасно.
 			if werr := w.WriteMessage(websocket.BinaryMessage, frame); werr != nil {
 				if *verbose {
 					log.Printf("[tunnel] stream %d WS write error: %v", stream.id, werr)

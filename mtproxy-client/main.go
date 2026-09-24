@@ -41,12 +41,18 @@ var connSemaphore chan struct{}
 type wsWriter struct {
 	ws *websocket.Conn
 	mu sync.Mutex
+    deadline time.Time // Кэш дедлайна для избежания лишних SetWriteDeadline
 }
 
 func (w *wsWriter) WriteMessage(messageType int, data []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	now := time.Now()
+	// Обновляем дедлайн только если он скоро истечет (экономим системные вызовы)
+	if w.deadline.IsZero() || now.After(w.deadline.Add(-2*time.Second)) {
+		w.deadline = now.Add(10 * time.Second)
+		w.ws.SetWriteDeadline(w.deadline)
+	}
 	return w.ws.WriteMessage(messageType, data)
 }
 

@@ -40,6 +40,19 @@ import (
 	"time"
 )
 
+// Глобальный HTTP-клиент для регистрации.
+// Создание http.Transport на каждый запрос создаёт лишние горутины
+// и утечки памяти на слабом железе (MT7628).
+var registerClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		DisableKeepAlives: true, // Экономим ресурсы
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp4", relayDialAddr(addr))
+		},
+	},
+}
+
 type relayIdentity struct {
 	InstallID string `json:"install_id"` // 16 bytes hex (32 chars)
 	Priv      string `json:"priv"`       // base64(std) Ed25519 private key
@@ -136,21 +149,7 @@ func (id *relayIdentity) register(registerURL, secret string) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Z2K-Auth", hex.EncodeToString(mac.Sum(nil)))
-	cl := &http.Client{
-		Timeout: 15 * time.Second,
-		Transport: &http.Transport{
-			// Force IPv4 — IPv6 to Cloudflare is unstable on some ISPs (mirrors
-			// the WS dialer).
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				// relayDialAddr: имя вида <ip>.nip.io несёт адрес внутри себя,
-				// поэтому в резолвер за ним не ходим — иначе мёртвый резолвер
-				// на роутере убивает регистрацию, а с ней и весь туннель.
-				// TLS-имя при этом не меняется: сертификат проверяется по URL.
-				return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp4", relayDialAddr(addr))
-			},
-		},
-	}
-	resp, err := cl.Do(req)
+    resp, err := registerClient.Do(req)
 	if err != nil {
 		return err
 	}
