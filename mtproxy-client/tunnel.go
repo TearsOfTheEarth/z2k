@@ -23,7 +23,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Mux message types
 const (
 	muxCONNECT      = 0x01
 	muxDATA         = 0x02
@@ -32,39 +31,24 @@ const (
 	muxCONNECT_FAIL = 0x05
 )
 
-// Пинг раз в 10 с, таймаут чтения 30 с (три пропущенных понга).
-//
-// Было 30/90. Обрыв транзита между частью операторов и Aeza (02.09.2026,
-// три события за 32 часа по 1.5-2 минуты каждое) клиент замечал только
-// через 90 секунд молчания, потом 10 секунд неудачного дозвона и backoff —
-// около двух минут без Telegram на каждое событие. С 10/30 простой втрое
-// короче. Релей сбрасывает свой таймаут на каждый входящий пинг, поэтому
-// его 90 с менять не нужно; цена — 180 пингов в секунду на весь парк.
 const (
 	wsPingInterval = 10 * time.Second
 	wsReadTimeout  = 30 * time.Second
 )
 
-// Минимальный интервал между повторными регистрациями. Прежняя константа
-// idFallbackCooldownSec (300 с) описывала, сколько клиент СИДИТ на общем
-// секрете; теперь он туда не уходит вовсе, и смысл интервала другой — не чаще
-// какого срока мы дёргаем /register, у которого своё ограничение частоты.
 const reRegMinIntervalSec = 120
 
-// Address types for CONNECT payload
 const (
 	addrIPv4 = 1
 	addrIPv6 = 4
 )
 
-// muxFrame represents a decoded mux protocol frame.
 type muxFrame struct {
 	StreamID uint16
 	MsgType  byte
 	Payload  []byte
 }
 
-// encodeMuxFrame encodes a mux frame into binary wire format.
 func encodeMuxFrame(streamID uint16, msgType byte, payload []byte) []byte {
 	buf := make([]byte, 3+len(payload))
 	binary.BigEndian.PutUint16(buf[0:2], streamID)
@@ -75,7 +59,6 @@ func encodeMuxFrame(streamID uint16, msgType byte, payload []byte) []byte {
 	return buf
 }
 
-// decodeMuxFrame decodes a binary mux frame from wire format.
 func decodeMuxFrame(data []byte) (muxFrame, error) {
 	if len(data) < 3 {
 		return muxFrame{}, fmt.Errorf("mux frame too short: %d bytes", len(data))
@@ -87,7 +70,6 @@ func decodeMuxFrame(data []byte) (muxFrame, error) {
 	}, nil
 }
 
-// encodeConnectPayload creates the CONNECT payload: [addr_type][addr][port]
 func encodeConnectPayload(ip net.IP, port int) []byte {
 	v4 := ip.To4()
 	if v4 != nil {
@@ -104,11 +86,17 @@ func encodeConnectPayload(ip net.IP, port int) []byte {
 	return buf
 }
 
-// computeAuthHMAC computes the HMAC-SHA256 of the shared secret (keyed by itself).
 func computeAuthHMAC(secret string) []byte {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(secret))
 	return mac.Sum(nil)
+}
+
+type pendingConn struct {
+	clientConn   *net.TCPConn
+	origIP       net.IP
+	origPort     int
+	waitingSince time.Time
 }
 
 func configureWSKeepalive(ws *websocket.Conn) {
@@ -124,36 +112,34 @@ func configureWSKeepalive(ws *websocket.Conn) {
 	})
 }
 
-// tunnelClient manages the multiplexed WS tunnel.
 type tunnelClient struct {
 	tunnelURL    string
 	tunnelSecret string
 
-	// Атомарный, а не голый указатель: фоновая перерегистрация ПЕРЕПИСЫВАЕТ
-	// личность (перевыпуск после 409), а читают её горутины подключений на
-	// каждой аутентификации. Голое поле здесь — гонка данных.
 	identity     atomic.Pointer[relayIdentity]
 	registerURL  string
-	useID        atomic.Bool  // send per-install auth (set true after a successful register)
-	idFailStreak atomic.Int32 // consecutive fast deaths while on per-install auth
-	reRegAt      atomic.Int64 // unix sec последней повторной регистрации (защита от долбёжки)
-	reRegBusy    atomic.Bool  // повторная регистрация уже идёт
+	useID        atomic.Bool
+	idFailStreak atomic.Int32
+	reRegAt      atomic.Int64
+	reRegBusy    atomic.Bool
 
 	ws         *websocket.Conn
 	writer     *wsWriter
-	streams    sync.Map // uint16 → *tunnelStream
+	streams    sync.Map
 	nextID     atomic.Uint32
-	dropped    atomic.Uint64 // отброшено соединений, пока WS не поднят
-	dropLogged atomic.Bool   // строка «WS не поднят» уже сказана — не повторяем на каждое
-	mu         sync.Mutex    // protects ws/writer replacement during reconnect
-	connectSem chan struct{} // limits concurrent in-flight CONNECTs — 6 keeps SYN rate under TG DC burst threshold
+	dropped    atomic.Uint64
+	dropLogged atomic.Bool
+	mu         sync.Mutex
+	connectSem chan struct{}
 	ctx        context.Context
 	cancel     context.CancelFunc
 
-	// Протокол v2 (спека §2, §4). forceV1 — релей отверг рукопожатие v2 или
-	// не ответил на HELLO: дальше ходим по v1, как раньше. clockOffset —
-	// поправка часов из HELLO_ACK, применяется к ts в подписи. retryAfter —
-	// пауза, которую попросил релей (INFO RETRY_AFTER) перед переподключением.
+	// Горячее переподключение и буферизация
+	reconnecting atomic.Bool
+	pendingMu    sync.Mutex
+	pendingConns []*pendingConn
+
+	// Протокол v2
 	v2          atomic.Bool
 	forceV1     atomic.Bool
 	clockOffset atomic.Int64
@@ -166,31 +152,32 @@ type tunnelStream struct {
 	conn        *net.TCPConn
 	client      *tunnelClient
 	closeOnce   sync.Once
-	remoteClose atomic.Bool // set when relay initiated the close
-	semHeld     atomic.Bool // держим слот connectSem до CONNECT_OK/FAIL или закрытия
-	writing     atomic.Bool // phoneWriter запущен (после CONNECT_OK)
+	remoteClose atomic.Bool
+	semHeld     atomic.Bool
+	writing     atomic.Bool
 
-	// К телефону — через очередь и свой писатель (спека §4.3): уснувший
-	// телефон раньше стопорил reader WS и с ним все стримы сессии.
 	outq *byteQueue
 
-	// v2: кредит, выданный релеем (сколько можно послать), и сколько получено
-	// от релея и ещё не подтверждено кадром WINDOW.
 	credit      atomic.Int64
 	creditWake  chan struct{}
 	recvUnacked atomic.Int64
-	// Оптимизация: кэшированные дедлайны для избежания лишних системных вызовов
+
+	// Заморозка при переподключении
+	frozen         atomic.Bool
+	reconnectReady chan struct{}
+
+	// Кэшированные дедлайны
 	writeDeadline time.Time
 	readDeadline  time.Time
 }
 
 func newTunnelStream(id uint16, conn *net.TCPConn, tc *tunnelClient) *tunnelStream {
 	return &tunnelStream{id: id, conn: conn, client: tc,
-		outq: newByteQueue(phoneQueueBytes), creditWake: make(chan struct{}, 1)}
+		outq:           newByteQueue(phoneQueueBytes),
+		creditWake:     make(chan struct{}, 1),
+		reconnectReady: make(chan struct{}, 1)}
 }
 
-// phoneQueueBytes — очередь к телефону; в v2 её реально ограничивает окно,
-// которое выдал релей (2 МиБ с 03.09.2026), здесь только страховка с запасом.
 const phoneQueueBytes = 4 * 1024 * 1024
 
 func (s *tunnelStream) releaseSem() {
@@ -212,7 +199,6 @@ func (s *tunnelStream) close() {
 		case s.creditWake <- struct{}{}:
 		default:
 		}
-		// Only send CLOSE if we initiated the close (not the relay)
 		if !s.remoteClose.Load() {
 			s.client.mu.Lock()
 			w := s.client.writer
@@ -222,30 +208,39 @@ func (s *tunnelStream) close() {
 				w.WriteMessage(websocket.BinaryMessage, frame)
 			}
 		}
-		// Release connection semaphore
 		<-connSemaphore
 	})
 }
 
-// phoneWriter — единственный писатель в сокет телефона; дедлайн 15 с.
-// После записи половины окна релею уходит WINDOW (v2).
 func (s *tunnelStream) phoneWriter() {
 	tc := s.client
 	var consumed int64
 	defer s.close()
 	for s.outq.wait(tc.ctx.Done()) {
+		tc.mu.Lock()
+		w := tc.writer
+		tc.mu.Unlock()
+
+		if w == nil || s.frozen.Load() {
+			select {
+			case <-s.reconnectReady:
+				continue
+			case <-tc.ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+				return
+			}
+		}
+
 		p, ok := s.outq.pop()
 		if !ok {
 			continue
 		}
-
-		// Оптимизация: обновляем дедлайн записи не чаще раза в минуту
 		now := time.Now()
 		if s.writeDeadline.IsZero() || now.After(s.writeDeadline.Add(-1*time.Minute)) {
 			s.writeDeadline = now.Add(*connTimeout)
 			s.conn.SetWriteDeadline(s.writeDeadline)
 		}
-
 		if _, err := s.conn.Write(p); err != nil {
 			if *verbose {
 				log.Printf("[tunnel] stream %d write error: %v", s.id, err)
@@ -253,7 +248,6 @@ func (s *tunnelStream) phoneWriter() {
 			s.close()
 			return
 		}
-
 		if tc.v2.Load() {
 			consumed += int64(len(p))
 			if win := tc.window.Load(); win > 0 && consumed >= win/2 {
@@ -270,7 +264,6 @@ func (s *tunnelStream) phoneWriter() {
 	}
 }
 
-// grant — WINDOW от релея: можно слать ещё credit байт.
 func (s *tunnelStream) grant(credit int64) {
 	s.credit.Add(credit)
 	select {
@@ -279,41 +272,6 @@ func (s *tunnelStream) grant(credit int64) {
 	}
 }
 
-// connectTunnelWS establishes a WebSocket connection to the tunnel relay.
-// triggerReRegister перерегистрирует установку, когда персональная
-// аутентификация раз за разом обрывается. Это замена прежнему откату на общий
-// секрет: откат релей всё равно отвергает, а перерегистрация чинит настоящую
-// причину — отсутствие нашего публичного ключа у релея.
-//
-// Не блокирует цикл переподключения: попытка уходит в фон. Не чаще раза в
-// reRegMinIntervalSec — иначе клиент в петле быстрых обрывов превратился бы в
-// генератор запросов к /register, а он ограничен по частоте на стороне релея и
-// начал бы отвечать отказом уже законно.
-// registerOnce регистрирует текущую личность и САМА разбирает случай, когда
-// идентификатор уже занят другим ключом.
-//
-// Раньше этот разбор жил только в фоновой перерегистрации, а она вызывается
-// исключительно из ветки для уже зарегистрированных (useID). То есть установка,
-// у которой ключ разошёлся с реестром ДО первой удачной регистрации, получала
-// 409 в стартовом цикле, повторяла с тем же ключом бесконечно и не могла выйти
-// из этого никогда: перевыпуск был написан, но недостижим. Туннель при этом не
-// поднимался вовсе — релей требует персональную аутентификацию.
-//
-// Возвращает true, если после вызова личность зарегистрирована.
-// identityLoop добывает личность и регистрирует её, не сдаваясь.
-//
-// Два отказа раньше были окончательными и лечились только перезапуском
-// процесса. Первый: если loadOrMintIdentity не смогла записать файл (диск
-// переполнен, /opt в режиме только чтения), клиент писал строку в лог и не
-// пробовал больше НИКОГДА — а значит навсегда оставался на общем секрете,
-// который релей с включённым требованием персональной аутентификации не
-// принимает. Второй: 409 в стартовом цикле повторялся с тем же ключом до
-// бесконечности, потому что перевыпуск был доступен только уже
-// зарегистрировавшимся (см. registerOnce).
-//
-// Пауза растёт до 5 минут, а не до получаса: пока регистрация не прошла,
-// туннель не работает вообще, и длинная пауза — это прямое время простоя
-// телеграма у человека, а не экономия запросов к релею.
 func (tc *tunnelClient) identityLoop() {
 	for attempt := 0; ; attempt++ {
 		if tc.identity.Load() == nil {
@@ -351,8 +309,6 @@ func (tc *tunnelClient) registerOnce() bool {
 	if err == nil {
 		return true
 	}
-	// Идентификатор занят другим ключом — повторять с тем же бесполезно, ответ
-	// не изменится никогда. Перевыпускаем личность целиком.
 	if errors.Is(err, errIdentityTaken) {
 		log.Printf("[tunnel] идентификатор %s занят другим ключом — перевыпускаю личность", id.InstallID)
 		fresh, mErr := reMintIdentity(*relayIDFile)
@@ -368,9 +324,6 @@ func (tc *tunnelClient) registerOnce() bool {
 		log.Printf("[tunnel] новая личность зарегистрирована (%s)", fresh.InstallID)
 		return true
 	}
-	// Пишем ВСЕГДА, а не только под -v. Это единственная строка, отличающая
-	// «нас не пускают» от «сети нет», и без неё второй экземпляр туннеля
-	// (S97z2k-http-tunnel, запускается без -v) молчал о своих отказах вовсе.
 	log.Printf("[tunnel] регистрация не удалась: %v", err)
 	return false
 }
@@ -398,9 +351,6 @@ func (tc *tunnelClient) triggerReRegister() {
 }
 
 func (tc *tunnelClient) connectTunnelWS() (*websocket.Conn, error) {
-	// БЕЗ ЗАРЕГИСТРИРОВАННОЙ ЛИЧНОСТИ НЕ ЛЕЗЕМ НА РЕЛЕЙ ВОВСЕ: релей поднят с
-	// --require-per-install и общий секрет отвергает наглухо (issue #34).
-	// Регистрацией занимается identityLoop параллельно, ему нужно только время.
 	id := tc.identity.Load()
 	if id == nil || !tc.useID.Load() {
 		return nil, errNotRegistered
@@ -411,7 +361,6 @@ func (tc *tunnelClient) connectTunnelWS() (*websocket.Conn, error) {
 		HandshakeTimeout:  10 * time.Second,
 		EnableCompression: false,
 		NetDial: func(network, addr string) (net.Conn, error) {
-			// Force IPv4; relayDialAddr — адрес из имени, резолвер не нужен.
 			conn, err := net.DialTimeout("tcp4", relayDialAddr(addr), 10*time.Second)
 			if err != nil {
 				return nil, err
@@ -431,9 +380,6 @@ func (tc *tunnelClient) connectTunnelWS() (*websocket.Conn, error) {
 	if !tc.forceV1.Load() {
 		if err := tc.handshakeV2(ws, id); err != nil {
 			ws.Close()
-			// Релей не говорит на v2 или отверг рукопожатие по протоколу —
-			// дальше ходим по v1, как до r-82. Отказ по авторизации сюда
-			// не попадает: он одинаков для обеих версий.
 			tc.forceV1.Store(true)
 			return nil, fmt.Errorf("рукопожатие v2: %w (следующая попытка — v1)", err)
 		}
@@ -455,10 +401,6 @@ func (tc *tunnelClient) connectTunnelWS() (*websocket.Conn, error) {
 
 var errHandshakeRejected = errors.New("relay rejected v2 handshake")
 
-// handshakeV2: HELLO → HELLO_ACK(nonce, время сервера) → AUTHID v2 → INFO
-// AUTH_OK. Любой другой ответ или тишина в 10 с — ошибка; вызывающий уходит
-// на v1. Отказ авторизации (GOODBYE с причиной не PROTOCOL) — тоже ошибка,
-// но с текстом причины в логе: часы, отзыв, регистрация.
 func (tc *tunnelClient) handshakeV2(ws *websocket.Conn, id *relayIdentity) error {
 	ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if err := ws.WriteMessage(websocket.BinaryMessage, encodeMuxFrame(0, muxHELLO, encodeHello(buildVersion))); err != nil {
@@ -519,7 +461,6 @@ func (tc *tunnelClient) handshakeV2(ws *websocket.Conn, id *relayIdentity) error
 
 var errAuthRefused = errors.New("relay refused auth")
 
-// closeAllStreams closes all active tunnel streams.
 func (tc *tunnelClient) closeAllStreams() {
 	tc.streams.Range(func(key, value any) bool {
 		stream := value.(*tunnelStream)
@@ -528,8 +469,108 @@ func (tc *tunnelClient) closeAllStreams() {
 	})
 }
 
-// readLoop reads mux frames from the WS and dispatches to streams. Только
-// раскладывает: в сокеты телефонов пишут phoneWriter'ы стримов.
+func (tc *tunnelClient) freezeStreams() {
+	tc.streams.Range(func(key, value any) bool {
+		stream := value.(*tunnelStream)
+		stream.frozen.Store(true)
+		return true
+	})
+}
+
+func (tc *tunnelClient) unfreezeStreams() {
+	tc.streams.Range(func(key, value any) bool {
+		stream := value.(*tunnelStream)
+		if stream.frozen.CompareAndSwap(true, false) {
+			select {
+			case stream.reconnectReady <- struct{}{}:
+			default:
+			}
+		}
+		return true
+	})
+}
+
+func (tc *tunnelClient) bufferPendingConn(clientConn *net.TCPConn, origIP net.IP, origPort int) {
+	tc.pendingMu.Lock()
+	defer tc.pendingMu.Unlock()
+
+	if len(tc.pendingConns) >= *maxPending {
+		if len(tc.pendingConns) > 0 {
+			oldest := tc.pendingConns[0]
+			oldest.clientConn.Close()
+			tc.pendingConns = tc.pendingConns[1:]
+			tc.dropped.Add(1)
+		}
+	}
+
+	tc.pendingConns = append(tc.pendingConns, &pendingConn{
+		clientConn:   clientConn,
+		origIP:       origIP,
+		origPort:     origPort,
+		waitingSince: time.Now(),
+	})
+
+	if *verbose {
+		log.Printf("[tunnel] buffered connection %s:%d (pending: %d)", origIP, origPort, len(tc.pendingConns))
+	}
+}
+
+func (tc *tunnelClient) processPendingConns() {
+	tc.pendingMu.Lock()
+	pending := tc.pendingConns
+	tc.pendingConns = nil
+	tc.pendingMu.Unlock()
+
+	if len(pending) == 0 {
+		return
+	}
+
+	log.Printf("[tunnel] processing %d pending connections", len(pending))
+
+	for _, pc := range pending {
+		if time.Since(pc.waitingSince) > *pendingTimeout {
+			pc.clientConn.Close()
+			tc.dropped.Add(1)
+			continue
+		}
+		tc.openStream(pc.clientConn, pc.origIP, pc.origPort)
+	}
+}
+
+func (tc *tunnelClient) tryHotReconnect() bool {
+	tc.reconnecting.Store(true)
+	defer tc.reconnecting.Store(false)
+
+	if !*hotReconnect {
+		return false
+	}
+
+	deadline := time.Now().Add(*hotReconnectTimeout)
+	attempt := 0
+
+	for time.Now().Before(deadline) {
+		attempt++
+		ws, err := tc.connectTunnelWS()
+		if err == nil {
+			tc.mu.Lock()
+			tc.ws = ws
+			tc.writer = &wsWriter{ws: ws}
+			tc.mu.Unlock()
+
+			log.Printf("[tunnel] hot reconnect succeeded (attempt %d)", attempt)
+			return true
+		}
+
+		if *verbose {
+			log.Printf("[tunnel] hot reconnect attempt %d failed: %v", attempt, err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	log.Printf("[tunnel] hot reconnect failed after %d attempts", attempt)
+	return false
+}
+
 func (tc *tunnelClient) readLoop(ws *websocket.Conn) {
 	for {
 		_, msg, err := ws.ReadMessage()
@@ -581,7 +622,7 @@ func (tc *tunnelClient) readLoop(ws *websocket.Conn) {
 			}
 			stream.remoteClose.Store(true)
 			if stream.writing.Load() {
-				stream.outq.finish() // хвост данных дописать, потом закрыть
+				stream.outq.finish()
 			} else {
 				stream.close()
 			}
@@ -625,7 +666,6 @@ func (tc *tunnelClient) readLoop(ws *websocket.Conn) {
 	}
 }
 
-// onControl — кадры на стриме 0 после рукопожатия: только INFO.
 func (tc *tunnelClient) onControl(frame muxFrame) {
 	if frame.MsgType != muxINFO {
 		return
@@ -636,9 +676,6 @@ func (tc *tunnelClient) onControl(frame muxFrame) {
 	}
 	switch kind {
 	case infoRetryAfter:
-		// Потолок 5 с: релей r-82.1 просил до 60 с, и это была минута мёртвого
-		// Telegram у всех при каждом переключении экземпляра (03.09.2026).
-		// Второй экземпляр к этому моменту уже работает — ждать нечего.
 		if arg > maxRetryAfterSec {
 			arg = maxRetryAfterSec
 		}
@@ -653,17 +690,30 @@ func (tc *tunnelClient) onControl(frame muxFrame) {
 	}
 }
 
-// streamReadLoop reads from a TCP client and sends DATA frames over WS.
-// В v2 отправка идёт в пределах кредита релея: нет кредита — не читаем
-// телефон, давление доходит до приложения по TCP.
 func (tc *tunnelClient) streamReadLoop(stream *tunnelStream) {
 	defer stream.close()
 
-	// Оптимизация: выделяем буфер с запасом 3 байта под заголовок mux кадра.
-	// Это позволяет читать данные прямо в buf[3:] и избежать аллокации []byte в encodeMuxFrame.
 	buf := make([]byte, 16*1024+3)
 
 	for {
+		tc.mu.Lock()
+		w := tc.writer
+		tc.mu.Unlock()
+
+		if w == nil || stream.frozen.Load() {
+			select {
+			case <-stream.reconnectReady:
+				continue
+			case <-tc.ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+				if *verbose {
+					log.Printf("[tunnel] stream %d: timeout waiting for reconnect", stream.id)
+				}
+				return
+			}
+		}
+
 		want := len(buf) - 3
 		if tc.v2.Load() {
 			for stream.credit.Load() <= 0 {
@@ -680,10 +730,8 @@ func (tc *tunnelClient) streamReadLoop(stream *tunnelStream) {
 				want = int(cr)
 			}
 		}
-
 		n, err := stream.conn.Read(buf[3 : 3+want])
 		if n > 0 {
-			// Оптимизация: обновляем дедлайн чтения не чаще раза в минуту
 			now := time.Now()
 			if stream.readDeadline.IsZero() || now.After(stream.readDeadline.Add(-1*time.Minute)) {
 				stream.readDeadline = now.Add(*connTimeout)
@@ -693,7 +741,6 @@ func (tc *tunnelClient) streamReadLoop(stream *tunnelStream) {
 				stream.credit.Add(-int64(n))
 			}
 
-			// Заполняем заголовок прямо в переиспользуемом буфере
 			binary.BigEndian.PutUint16(buf[0:2], stream.id)
 			buf[2] = muxDATA
 			frame := buf[:3+n]
@@ -704,8 +751,6 @@ func (tc *tunnelClient) streamReadLoop(stream *tunnelStream) {
 			if w == nil {
 				return
 			}
-			// WriteMessage копирует данные или синхронно пишет в сокет,
-			// поэтому переиспользование buf на следующей итерации абсолютно безопасно.
 			if werr := w.WriteMessage(websocket.BinaryMessage, frame); werr != nil {
 				if *verbose {
 					log.Printf("[tunnel] stream %d WS write error: %v", stream.id, werr)
@@ -719,7 +764,6 @@ func (tc *tunnelClient) streamReadLoop(stream *tunnelStream) {
 	}
 }
 
-// run manages the persistent WS connection with auto-reconnect.
 func (tc *tunnelClient) run() {
 	consecutiveFails := 0
 
@@ -732,10 +776,6 @@ func (tc *tunnelClient) run() {
 
 		ws, err := tc.connectTunnelWS()
 		if errors.Is(err, errNotRegistered) {
-			// Не отказ сети и не повод раскручивать backoff до двух минут:
-			// регистрацией занимается identityLoop, ему нужно время. Ждём
-			// коротко и молча — жаловаться тут не на что, а вот стучаться в
-			// релей схемой, которую он отвергает, было бы вредно и ему, и нам.
 			select {
 			case <-time.After(5 * time.Second):
 				continue
@@ -759,6 +799,10 @@ func (tc *tunnelClient) run() {
 		tc.ws = ws
 		tc.writer = &wsWriter{ws: ws}
 		tc.mu.Unlock()
+
+		tc.unfreezeStreams()
+		tc.processPendingConns()
+
 		if n := tc.dropped.Swap(0); n > 0 {
 			log.Printf("[tunnel] WS поднят; пока его не было, отброшено соединений: %d", n)
 		}
@@ -766,7 +810,6 @@ func (tc *tunnelClient) run() {
 
 		connectedAt := time.Now()
 
-		// Keepalive: ping every 30s (symmetric with server)
 		wsDone := make(chan struct{})
 		pingDone := make(chan struct{})
 		go func() {
@@ -796,20 +839,31 @@ func (tc *tunnelClient) run() {
 			}
 		}()
 
-		// Read loop blocks until WS disconnects
-		tc.readLoop(ws)
+		readDone := make(chan struct{})
+		go func() {
+			defer close(readDone)
+			tc.readLoop(ws)
+		}()
+		<-readDone
 
-		// WS disconnected — signal ping goroutine, close all streams
 		close(wsDone)
-		log.Printf("[tunnel] WS disconnected, closing all streams")
+		log.Printf("[tunnel] WS disconnected")
+
+		tc.freezeStreams()
+
 		tc.mu.Lock()
 		tc.ws = nil
 		tc.writer = nil
 		tc.mu.Unlock()
 		ws.Close()
+
+		if tc.tryHotReconnect() {
+			continue
+		}
+
+		log.Printf("[tunnel] hot reconnect failed, closing all streams")
 		tc.closeAllStreams()
 
-		// Drain connect semaphore — pending CONNECTs died with the WS
 		for {
 			select {
 			case <-tc.connectSem:
@@ -819,25 +873,11 @@ func (tc *tunnelClient) run() {
 		}
 	drained:
 
-		// Wait for ping goroutine
 		select {
 		case <-pingDone:
 		case <-time.After(2 * time.Second):
 		}
 
-		// Per-install auth keeps dying fast → RE-REGISTER, never fall back.
-		//
-		// Раньше здесь стоял откат на общий секрет с расчётом, что релей принимает
-		// оба способа. С включением --require-per-install это перестало быть правдой:
-		// релей общий секрет отвергает молча, и откат превращал поправимую заминку в
-		// гарантированные 300 секунд мёртвого туннеля — после которых всё
-		// повторялось. Полевой симптом: «WS died too fast (5 in a row)» без конца.
-		//
-		// Причина быстрых обрывов на персональной аутентификации почти всегда одна:
-		// у релея нет нашего публичного ключа (регистрация не доехала, реестр
-		// потерян, ключ перевыпущен). Это лечится повторной регистрацией, а не
-		// сменой способа входа. Поэтому мы остаёмся на персональной аутентификации
-		// и заново регистрируемся в фоне.
 		if tc.useID.Load() {
 			if time.Since(connectedAt) < 8*time.Second {
 				if tc.idFailStreak.Add(1) >= 3 {
@@ -849,9 +889,6 @@ func (tc *tunnelClient) run() {
 			}
 		}
 
-		// Пауза перед переподключением: RETRY_AFTER от релея (деплой) важнее
-		// собственной ступени; и то и другое с джиттером, иначе весь парк бьёт
-		// в узел одной секундой (SYN-очередь 31.08.2026).
 		if ra := tc.retryAfter.Swap(0); ra > 0 {
 			wait := jitter(time.Duration(ra) * time.Second)
 			log.Printf("[tunnel] reconnecting in %s (relay asked)", wait.Round(time.Millisecond))
@@ -861,7 +898,6 @@ func (tc *tunnelClient) run() {
 				return
 			}
 		} else if time.Since(connectedAt) < 5*time.Second {
-			// If WS lived < 5 seconds, it's a rapid death — increase backoff
 			consecutiveFails++
 			backoff := jitter(backoffFor(consecutiveFails))
 			log.Printf("[tunnel] WS died too fast (%d in a row), backing off %s", consecutiveFails, backoff.Round(time.Millisecond))
@@ -882,12 +918,10 @@ func (tc *tunnelClient) run() {
 	}
 }
 
-// handleTunnelConn handles a new TCP connection by creating a mux stream.
 func (tc *tunnelClient) handleTunnelConn(clientConn *net.TCPConn) {
 	clientConn.SetNoDelay(true)
 	clientConn.SetDeadline(time.Now().Add(*connTimeout))
 
-	// Get original destination (iptables REDIRECT)
 	origIP, origPort, err := getOriginalDst(clientConn)
 	if err != nil {
 		if *verbose {
@@ -898,11 +932,6 @@ func (tc *tunnelClient) handleTunnelConn(clientConn *net.TCPConn) {
 		return
 	}
 
-	// САМОНАБОР ОТСЕКАЕМ ЗДЕСЬ, а не у релея. Релей и так отказывает, но
-	// клиент повторяет: одна такая сессия давала две попытки в секунду
-	// круглосуточно (замер 26.08.2026 — ~16 000 отказов в сутки, больше, чем
-	// все прочие источники релея вместе). Отказ на своей стороне обрывает
-	// петлю в её начале и не тратит ни канал, ни чужой процессор.
 	if isSelfDialAny(origIP, origPort, listenPorts) {
 		if *verbose {
 			log.Printf("[tunnel] самонабор на %s:%d — соединение пришло на слушатель напрямую, не через redirect", origIP, origPort)
@@ -915,11 +944,7 @@ func (tc *tunnelClient) handleTunnelConn(clientConn *net.TCPConn) {
 	tc.openStream(clientConn, origIP, origPort)
 }
 
-// openStream — часть handleTunnelConn после определения адресата: выделяет
-// стрим, берёт слот connectSem и шлёт CONNECT. Отдельно, чтобы тесты могли
-// обойти SO_ORIGINAL_DST.
 func (tc *tunnelClient) openStream(clientConn *net.TCPConn, origIP net.IP, origPort int) {
-	// Allocate stream ID — skip IDs still in use (prevents wrap-around collision)
 	var streamID uint16
 	idFound := false
 	for i := 0; i < 100; i++ {
@@ -941,23 +966,7 @@ func (tc *tunnelClient) openStream(clientConn *net.TCPConn, origIP net.IP, origP
 	w := tc.writer
 	tc.mu.Unlock()
 	if w == nil {
-		// СТРОКА НА КАЖДОЕ СОЕДИНЕНИЕ УБИВАЛА ДИАГНОСТИКУ.
-		//
-		// Пока WS не поднят, клиент телеграма ломится непрерывно: он видит
-		// завершённый TCP-хендшейк и мгновенный обрыв, то есть отказ НЕ на SYN,
-		// и своего бэкоффа у него не наступает. Получались сотни строк
-		// «dropping stream N» в секунду — а причина («регистрация не удалась:
-		// ...») печатается раз в ~40 с. Сторож поверх этого затирал лог каждые
-		// три минуты, и в отчёте у человека оставались одни дропы без причины.
-		// Диагноз приходилось ставить по тому, чего в логе НЕТ.
-		//
-		// Теперь громко сообщаем только СМЕНУ состояния и раз в минуту — сводку.
-		tc.dropped.Add(1)
-		if tc.dropLogged.CompareAndSwap(false, true) {
-			log.Printf("[tunnel] WS не поднят — входящие соединения отбрасываются (причина выше)")
-		}
-		clientConn.Close()
-		<-connSemaphore
+		tc.bufferPendingConn(clientConn, origIP, origPort)
 		return
 	}
 
@@ -968,7 +977,6 @@ func (tc *tunnelClient) openStream(clientConn *net.TCPConn, origIP net.IP, origP
 		log.Printf("[tunnel] stream %d: %s -> %s:%d", streamID, clientConn.RemoteAddr(), origIP, origPort)
 	}
 
-	// Rate-limit concurrent in-flight CONNECTs — TG DC throttles SYN bursts from single IP
 	select {
 	case tc.connectSem <- struct{}{}:
 		stream.semHeld.Store(true)
@@ -979,7 +987,6 @@ func (tc *tunnelClient) openStream(clientConn *net.TCPConn, origIP net.IP, origP
 		return
 	}
 
-	// Send CONNECT frame
 	connectPayload := encodeConnectPayload(origIP, origPort)
 	frame := encodeMuxFrame(streamID, muxCONNECT, connectPayload)
 	if err := w.WriteMessage(websocket.BinaryMessage, frame); err != nil {
@@ -988,11 +995,8 @@ func (tc *tunnelClient) openStream(clientConn *net.TCPConn, origIP net.IP, origP
 		stream.close()
 		return
 	}
-
-	// streamReadLoop starts when CONNECT_OK is received in readLoop
 }
 
-// runTunnel is the entry point for tunnel mode.
 func runTunnel() error {
 	if *tunnelURL == "" {
 		return fmt.Errorf("--tunnel-url is required in tunnel mode")
@@ -1003,12 +1007,7 @@ func runTunnel() error {
 
 	connSemaphore = make(chan struct{}, *maxConns)
 
-	// Все слушатели биндим ДО чего-либо ещё, и любой отказ — отказ целиком.
-	// Полусерввис (1443 слушает, 1444 нет) хуже честного падения: надзиратель
-	// перезапустит процесс, а вот половину портов никто не заметит.
 	addrs := listenAddrs.addrs()
-	// Порты слушателей — для отсечения самонабора: при двух портах петля
-	// возможна на любом из них, проверять только первый было бы дырой.
 	listenPorts = make(map[int]bool, len(addrs))
 	for _, a := range addrs {
 		if p := listenPortOf(a); p != 0 {
@@ -1039,17 +1038,11 @@ func runTunnel() error {
 	}
 	tc.ctx, tc.cancel = context.WithCancel(ctx)
 
-	// Stage B: load/mint the per-install identity and register it in the
-	// background. Until registration succeeds the client authenticates with the
-	// shared secret (dual-accepted by the relay), so a relay without /register or
-	// a transient registration failure never blocks the tunnel.
 	tc.registerURL = deriveRegisterURL(*tunnelURL)
 	go tc.identityLoop()
 
 	go tc.run()
 
-	// Wait for first WS connection before accepting TCP — prevents burst
-	// of connections hitting a not-yet-ready Worker
 	for i := 0; i < 100; i++ {
 		tc.mu.Lock()
 		w := tc.writer
@@ -1060,10 +1053,6 @@ func runTunnel() error {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	// Сводка раз в минуту, пока WS лежит. Одной строки при падении мало:
-	// если туннель не поднимется часами (мёртвый резолвер, недоступный релей),
-	// объём отбрасываемого останется невидимым, а именно он объясняет, почему
-	// у человека «телеграм не работает», хотя процесс жив и порт слушается.
 	go func() {
 		t := time.NewTicker(60 * time.Second)
 		defer t.Stop()
@@ -1094,9 +1083,6 @@ func runTunnel() error {
 		}
 	}()
 
-	// По accept-циклу на слушатель, все — в один и тот же клиент туннеля.
-	// Возвращаемся, когда закончились все: ошибка любого — ошибка процесса,
-	// надзиратель поднимет заново.
 	var wg sync.WaitGroup
 	errs := make(chan error, len(lns))
 	for _, ln := range lns {
@@ -1116,16 +1102,7 @@ func runTunnel() error {
 	return nil
 }
 
-// acceptLoop обслуживает один слушатель. Логика та же, что жила в runTunnel,
-// когда слушатель был один; вынесена, чтобы гоняться по каждому порту.
 func (tc *tunnelClient) acceptLoop(ctx context.Context, ln net.Listener) error {
-
-	// Бэкофф для временных ошибок Accept. Голый `continue` здесь означал
-	// 100% CPU навсегда: при EMFILE (кончились дескрипторы) или после того,
-	// как слушатель закрыт не через ctx (net.ErrClosed), ошибка постоянна, и
-	// цикл крутится вхолостую на роутере, где это единственное ядро. Своего
-	// watchdog'а у клиента нет, в логе тоже ничего — ровно тот класс, что уже
-	// проживал 141 час CPU незамеченным у осиротевшего спиннера.
 	var acceptDelay time.Duration
 	const acceptDelayMax = 1 * time.Second
 
@@ -1138,14 +1115,10 @@ func (tc *tunnelClient) acceptLoop(ctx context.Context, ln net.Listener) error {
 				return nil
 			default:
 			}
-			// Закрытый слушатель — состояние необратимое: повторять Accept
-			// бессмысленно, супервизор поднимет процесс заново.
 			if errors.Is(err, net.ErrClosed) {
 				log.Printf("[tunnel] listener closed: %v — stopping accept loop", err)
 				return err
 			}
-			// Временное (EMFILE/ENFILE/ECONNABORTED) — отступаем с удвоением,
-			// давая дескрипторам освободиться, и обязательно пишем в лог.
 			if acceptDelay == 0 {
 				acceptDelay = 5 * time.Millisecond
 			} else {
@@ -1182,10 +1155,8 @@ func (tc *tunnelClient) acceptLoop(ctx context.Context, ln net.Listener) error {
 	}
 }
 
-// maxRetryAfterSec — потолок RETRY_AFTER от релея.
 const maxRetryAfterSec = 5
 
-// backoffFor — ступени паузы по числу подряд неудач (как до r-82).
 func backoffFor(consecutiveFails int) time.Duration {
 	switch {
 	case consecutiveFails >= 10:
@@ -1198,9 +1169,6 @@ func backoffFor(consecutiveFails int) time.Duration {
 	return 3 * time.Second
 }
 
-// jitter — ±30 % случайного разброса: у полутора тысяч роутеров общее
-// событие (обрыв транзита, деплой релея) не должно превращаться в одну
-// секунду переподключений.
 func jitter(d time.Duration) time.Duration {
 	f := 0.7 + rand.Float64()*0.6
 	return time.Duration(float64(d) * f)

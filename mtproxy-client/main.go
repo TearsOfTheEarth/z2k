@@ -9,18 +9,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// defaultTunnelSecret is injected at BUILD time, NOT committed to source, via:
-//
-//	go build -ldflags "-X main.defaultTunnelSecret=<hex>"
-//
-// (see mtproxy-client/Makefile, var Z2K_TUNNEL_SECRET). It is intentionally empty
-// in the public repo so the shared tunnel credential is not published. A binary
-// built without it requires --tunnel-secret at runtime (the router passes it from
-// /opt/zapret2/config Z2K_RELAY_SECRET when set; see files/init.d/S98tg-tunnel).
 var defaultTunnelSecret = ""
 
-// buildVersion — версия релиза z2k, вшивается Makefile (-X main.buildVersion);
-// уходит релею в HELLO, чтобы тот мог попросить обновиться.
 var buildVersion = "dev"
 
 var (
@@ -31,26 +21,26 @@ var (
 	connTimeout  = flag.Duration("timeout", 15*time.Minute, "Idle connection timeout")
 	maxConns     = flag.Int("max-conns", 1024, "Maximum concurrent connections")
 	relayIDFile  = flag.String("relay-id-file", "/opt/zapret2/.z2k-relay-id", "per-install identity file (Stage B)")
+
+	// Горячее переподключение и буферизация
+	hotReconnect        = flag.Bool("hot-reconnect", true, "try hot reconnect before closing streams")
+	hotReconnectTimeout = flag.Duration("hot-reconnect-timeout", 5*time.Second, "timeout for hot reconnect attempts")
+	pendingTimeout      = flag.Duration("pending-timeout", 10*time.Second, "max time to buffer incoming connections")
+	maxPending          = flag.Int("max-pending", 128, "max buffered connections during reconnect")
 )
 
-// connSemaphore limits concurrent connections
 var connSemaphore chan struct{}
 
-// wsWriter serializes all writes to a WebSocket connection.
-// gorilla/websocket supports only one concurrent writer.
-// wsWriter serializes all writes to a WebSocket connection.
-// gorilla/websocket supports only one concurrent writer.
 type wsWriter struct {
 	ws       *websocket.Conn
 	mu       sync.Mutex
-	deadline time.Time // Кэш дедлайна для избежания лишних SetWriteDeadline
+	deadline time.Time
 }
 
 func (w *wsWriter) WriteMessage(messageType int, data []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	now := time.Now()
-	// Обновляем дедлайн только если он скоро истечет (экономим системные вызовы)
 	if w.deadline.IsZero() || now.After(w.deadline.Add(-2*time.Second)) {
 		w.deadline = now.Add(10 * time.Second)
 		w.ws.SetWriteDeadline(w.deadline)
@@ -58,9 +48,6 @@ func (w *wsWriter) WriteMessage(messageType int, data []byte) error {
 	return w.ws.WriteMessage(messageType, data)
 }
 
-// WriteControl — без общего замка: gorilla допускает control-кадры параллельно
-// с data-записью, а под замком пинг ждал медленную DATA-запись и WS умирал
-// по «read timeout» ни за что.
 func (w *wsWriter) WriteControl(messageType int, data []byte, deadline time.Time) error {
 	return w.ws.WriteControl(messageType, data, deadline)
 }
