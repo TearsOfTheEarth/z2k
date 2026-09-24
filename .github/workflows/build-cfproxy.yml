@@ -1,0 +1,36 @@
+name: Build CF Proxy MT7628
+
+on:
+  push:
+    branches: [ cfproxy ]
+  workflow_dispatch:
+
+jobs:
+  build-cfproxy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: cfproxy
+    
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.25'
+    
+    - name: Build
+      env:
+        CGO_ENABLED: 0
+        GOOS: linux
+        GOARCH: mipsle
+        GOMIPS: softfloat
+      run: |
+        cd mtproxy-client
+        go build -ldflags="-s -w" -trimpath -buildvcs=false -o tg-mtproxy-client-cfproxy-mt7628 .
+    
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: tg-mtproxy-client-cfproxy-mt7628
+        path: mtproxy-client/tg-mtproxy-client-cfproxy-mt7628
