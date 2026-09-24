@@ -31,22 +31,31 @@ var (
 	connTimeout  = flag.Duration("timeout", 15*time.Minute, "Idle connection timeout")
 	maxConns     = flag.Int("max-conns", 1024, "Maximum concurrent connections")
 	relayIDFile  = flag.String("relay-id-file", "/opt/zapret2/.z2k-relay-id", "per-install identity file (Stage B)")
+
+	// Режим работы
+	useCfProxy = flag.Bool("cf-proxy", true, "Use CF proxy domain fronting (no relay needed)")
 )
 
-// connSemaphore limits concurrent connections
+// connSemaphore limits concurrent connections (для tunnel mode)
 var connSemaphore chan struct{}
 
 // wsWriter serializes all writes to a WebSocket connection.
 // gorilla/websocket supports only one concurrent writer.
 type wsWriter struct {
-	ws *websocket.Conn
-	mu sync.Mutex
+	ws       *websocket.Conn
+	mu       sync.Mutex
+	deadline time.Time // Кэш дедлайна для избежания лишних SetWriteDeadline
 }
 
 func (w *wsWriter) WriteMessage(messageType int, data []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	now := time.Now()
+	// Обновляем дедлайн только если он скоро истечет
+	if w.deadline.IsZero() || now.After(w.deadline.Add(-2*time.Second)) {
+		w.deadline = now.Add(10 * time.Second)
+		w.ws.SetWriteDeadline(w.deadline)
+	}
 	return w.ws.WriteMessage(messageType, data)
 }
 
@@ -63,8 +72,15 @@ func init() {
 
 func main() {
 	flag.Parse()
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	if err := runTunnel(); err != nil {
-		log.Fatal(err)
+	if *useCfProxy {
+		if err := runCfProxy(); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		if err := runTunnel(); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
