@@ -149,7 +149,7 @@ func (id *relayIdentity) register(registerURL, secret string) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Z2K-Auth", hex.EncodeToString(mac.Sum(nil)))
-    resp, err := registerClient.Do(req)
+	resp, err := registerClient.Do(req)
 	if err != nil {
 		return err
 	}
